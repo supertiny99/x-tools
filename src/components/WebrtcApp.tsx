@@ -23,6 +23,7 @@ export default function WebrtcApp() {
     const [messages, setMessages] = useState<Message[]>([]);
     const [inputText, setInputText] = useState('');
     const [copied, setCopied] = useState(false);
+    const [isDragging, setIsDragging] = useState(false);
 
     const peerRef = useRef<Peer | null>(null);
     const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -111,7 +112,7 @@ export default function WebrtcApp() {
                 setMessages((prev) => [
                     ...prev,
                     {
-                        id: Date.now().toString(),
+                        id: Date.now().toString() + Math.random().toString(36).substring(2, 9),
                         sender: 'remote',
                         type: 'file',
                         content: '文件已接收',
@@ -181,8 +182,7 @@ export default function WebrtcApp() {
         setInputText('');
     };
 
-    const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
+    const sendFile = (file: File) => {
         if (!file || !connection) return;
 
         connection.send({
@@ -204,7 +204,7 @@ export default function WebrtcApp() {
             setMessages((prev) => [
                 ...prev,
                 {
-                    id: Date.now().toString(),
+                    id: Date.now().toString() + Math.random().toString(36).substring(2, 9),
                     sender: 'me',
                     type: 'file',
                     content: '文件已发送',
@@ -216,7 +216,61 @@ export default function WebrtcApp() {
             ]);
         };
         reader.readAsArrayBuffer(file);
+    };
+
+    const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (file) {
+            sendFile(file);
+        }
         if (fileInputRef.current) fileInputRef.current.value = '';
+    };
+
+    const handleDragOver = (e: React.DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (status === 'connected') {
+            setIsDragging(true);
+        }
+    };
+
+    const handleDragEnter = (e: React.DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (status === 'connected') {
+            setIsDragging(true);
+        }
+    };
+
+    const handleDragLeave = (e: React.DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+
+        // Prevent flickering when dragging over child elements
+        const rect = e.currentTarget.getBoundingClientRect();
+        if (
+            e.clientX <= rect.left ||
+            e.clientX >= rect.right ||
+            e.clientY <= rect.top ||
+            e.clientY >= rect.bottom
+        ) {
+            setIsDragging(false);
+        }
+    };
+
+    const handleDrop = (e: React.DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsDragging(false);
+
+        if (status !== 'connected') return;
+
+        const files = e.dataTransfer.files;
+        if (files && files.length > 0) {
+            Array.from(files).forEach(file => {
+                sendFile(file);
+            });
+        }
     };
 
     const downloadFile = (message: Message) => {
@@ -305,7 +359,24 @@ export default function WebrtcApp() {
             </div>
 
             {/* Main Chat Area */}
-            <div className="flex-grow flex flex-col bg-white/60 dark:bg-slate-950/60 h-[600px] md:h-auto">
+            <div
+                className={`flex-grow flex flex-col h-[600px] md:h-auto transition-colors relative ${isDragging ? 'bg-brand-50/80 dark:bg-brand-900/20 ring-2 ring-brand-500 ring-inset' : 'bg-white/60 dark:bg-slate-950/60'}`}
+                onDragOver={handleDragOver}
+                onDragEnter={handleDragEnter}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+            >
+                {isDragging && (
+                    <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/50 dark:bg-slate-900/50 backdrop-blur-sm pointer-events-none">
+                        <div className="text-center p-8 bg-white dark:bg-slate-800 rounded-2xl shadow-2xl flex flex-col items-center gap-4 border-2 border-dashed border-brand-500">
+                            <div className="w-20 h-20 bg-brand-100 text-brand-600 dark:bg-brand-900 dark:text-brand-300 rounded-full flex items-center justify-center text-4xl">
+                                <FiPaperclip />
+                            </div>
+                            <h3 className="text-2xl font-bold text-slate-800 dark:text-white">释放文件即可发送</h3>
+                            <p className="text-slate-500">支持批量拖入多个文件</p>
+                        </div>
+                    </div>
+                )}
                 <div className="flex-grow overflow-y-auto p-6 space-y-4">
                     {messages.length === 0 ? (
                         <div className="h-full flex flex-col items-center justify-center text-slate-400 dark:text-slate-500">
