@@ -30,6 +30,29 @@ const { title, description = "在线实用工具集合" } = Astro.props;
 	<body
 		class="min-h-screen flex flex-col font-sans overflow-x-hidden relative selection:bg-brand-500/30"
 	>
+		<!-- Theme toggle checkbox -->
+		<input
+			type="checkbox"
+			id="theme-toggle"
+			class="peer hidden"
+			autocomplete="off"
+			aria-hidden="true"
+		/>
+
+		<!-- Base light background -->
+		<div
+			class="fixed inset-0 bg-slate-50 z-[-20] pointer-events-none transition-colors duration-700"
+		>
+		</div>
+
+		<!-- Dark mode ripple background -->
+		<div
+			class="fixed inset-0 bg-slate-950 z-[-15] pointer-events-none
+			[clip-path:circle(0%_at_calc(100%-5.25rem)_2rem)]
+			peer-checked:[clip-path:circle(150%_at_calc(100%-5.25rem)_2rem)]
+			transition-all duration-700 ease-in-out"
+		>
+		</div>
 		<!-- Decorative Background Elements -->
 		<div class="fixed inset-0 z-[-1] overflow-hidden pointer-events-none">
 			<div
@@ -78,31 +101,51 @@ const { title, description = "在线实用工具集合" } = Astro.props;
 					<div class="w-px h-5 bg-slate-200 dark:bg-slate-700 mx-2">
 					</div>
 
-					<!-- Theme Toggle (Placeholder for future JS) -->
-					<button
-						class="w-8 h-8 flex items-center justify-center rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-						aria-label="Toggle Theme"
+					<!-- Theme Toggle (Pure CSS Water Ripple) -->
+					<label
+						for="theme-toggle"
+						class="w-10 h-10 flex items-center justify-center rounded-full hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors cursor-pointer relative z-50"
+						title="切换主题"
 					>
+						<!-- Sun Icon (shown in Light mode) -->
 						<svg
 							xmlns="http://www.w3.org/2000/svg"
-							width="18"
-							height="18"
+							width="20"
+							height="20"
 							viewBox="0 0 24 24"
 							fill="none"
 							stroke="currentColor"
 							stroke-width="2"
 							stroke-linecap="round"
 							stroke-linejoin="round"
-							class="text-slate-600 dark:text-slate-300"
-							><circle cx="12" cy="12" r="4"></circle><path
-								d="M12 2v2"></path><path d="M12 20v2"
-							></path><path d="m4.93 4.93 1.41 1.41"></path><path
-								d="m17.66 17.66 1.41 1.41"></path><path
-								d="M2 12h2"></path><path d="M20 12h2"
-							></path><path d="m6.34 17.66-1.41 1.41"></path><path
-								d="m19.07 4.93-1.41 1.41"></path></svg
+							class="text-slate-600 dark:hidden"
 						>
-					</button>
+							<circle cx="12" cy="12" r="4"></circle>
+							<path d="M12 2v2"></path>
+							<path d="M12 20v2"></path>
+							<path d="m4.93 4.93 1.41 1.41"></path>
+							<path d="m17.66 17.66 1.41 1.41"></path>
+							<path d="M2 12h2"></path>
+							<path d="M20 12h2"></path>
+							<path d="m6.34 17.66-1.41 1.41"></path>
+							<path d="m19.07 4.93-1.41 1.41"></path>
+						</svg>
+						<!-- Moon Icon (shown in Dark mode) -->
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							width="20"
+							height="20"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							class="text-slate-300 hidden dark:block"
+						>
+							<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"></path>
+						</svg>
+					</label>
 
 					<!-- GitHub Link -->
 					<a

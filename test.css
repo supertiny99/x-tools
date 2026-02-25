@@ -1,0 +1,2 @@
+@import "tailwindcss";
+@custom-variant mydark (&:where(.ck:checked ~ *));
