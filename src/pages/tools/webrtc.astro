@@ -1,0 +1,24 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import WebrtcApp from '../../components/WebrtcApp';
+---
+
+<Layout title="WebRTC 直连通信">
+  <div class="container mx-auto px-4 py-8 flex flex-col min-h-[calc(100vh-8rem)]">
+    <div class="mb-8">
+      <a href="/" class="inline-flex items-center text-sm font-medium text-slate-500 hover:text-brand-600 dark:hover:text-brand-400 transition-colors mb-4 gap-1">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+        返回首页
+      </a>
+      <h1 class="text-3xl font-bold text-slate-900 dark:text-white mb-2">WebRTC 直连通信</h1>
+      <p class="text-slate-600 dark:text-slate-400">
+        点对点安全连接，无需经过服务器中转的消息与文件传输。
+      </p>
+    </div>
+
+    <!-- WebRTC Client Rendered on Client -->
+    <div class="flex-grow flex flex-col relative w-full max-w-5xl mx-auto rounded-3xl glass-panel overflow-hidden shadow-2xl shadow-brand-500/10">
+      <WebrtcApp client:only="react" />
+    </div>
+  </div>
+</Layout>

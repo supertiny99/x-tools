@@ -1,0 +1,84 @@
+---
+import Layout from '../layouts/Layout.astro';
+
+// 我们可以配置工具的一个列表数据
+const tools = [
+  {
+    id: 'webrtc',
+    name: 'WebRTC 直连通信',
+    description: '无需后端服务器，通过 P2P 建立两人私密连接。支持实时文本聊天与高速大文件传输。',
+    icon: '🚀',
+    href: '/tools/webrtc',
+    tags: ['P2P', '聊天', '文件传输'],
+    color: 'from-blue-500 to-indigo-600'
+  },
+  {
+    id: 'coming-soon',
+    name: '更多工具开发中',
+    description: '敬请期待，正在准备更多实用的在线小工具...',
+    icon: '✨',
+    href: '#',
+    tags: ['Coming Soon'],
+    color: 'from-slate-400 to-slate-500',
+    disabled: true
+  }
+];
+---
+
+<Layout title="首页导航">
+	<div class="container mx-auto px-4 py-12 flex flex-col items-center">
+		<!-- Hero Section -->
+		<section class="w-full max-w-4xl text-center mb-20 mt-10">
+			<h1 class="text-5xl md:text-6xl font-extrabold tracking-tight mb-6 bg-clip-text text-transparent bg-gradient-to-r from-slate-900 via-brand-600 to-slate-900 dark:from-white dark:via-brand-400 dark:to-white">
+				您的在线实验工具库
+			</h1>
+			<p class="text-xl text-slate-600 dark:text-slate-400 max-w-2xl mx-auto leading-relaxed">
+				这里汇集了由最新 Web 技术构建的各种有趣、实用的工具。体验极致的性能、美观的设计以及无需安装即可使用的便捷。
+			</p>
+		</section>
+
+		<!-- Tool Grid -->
+		<section class="w-full max-w-5xl">
+			<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+				{tools.map((tool) => (
+					<a 
+            href={tool.disabled ? '#' : tool.href} 
+            class={`relative flex flex-col p-6 rounded-2xl glass-card group overflow-hidden ${tool.disabled ? 'opacity-70 cursor-not-allowed' : 'hover:-translate-y-1'}`}
+          >
+						<!-- Decorative gradient background effect on hover -->
+						{!tool.disabled && (
+							<div class={`absolute inset-0 bg-gradient-to-br ${tool.color} opacity-0 group-hover:opacity-5 transition-opacity duration-300 pointer-events-none`}></div>
+						)}
+            
+						<div class="flex items-start justify-between mb-4 relative z-10">
+							<div class={`w-12 h-12 rounded-xl flex items-center justify-center text-2xl shadow-sm ${tool.disabled ? 'bg-slate-100 dark:bg-slate-800' : `bg-black/5 dark:bg-white/10`}`}>
+								{tool.icon}
+							</div>
+							<div class="flex gap-2">
+								{tool.tags.map(tag => (
+									<span class="text-xs font-medium px-2.5 py-1 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700">
+										{tag}
+									</span>
+								))}
+							</div>
+						</div>
+						
+						<h3 class="text-xl font-bold mb-2 text-slate-900 dark:text-white relative z-10">
+							{tool.name}
+						</h3>
+						<p class="text-slate-600 dark:text-slate-400 text-sm leading-relaxed flex-grow relative z-10">
+							{tool.description}
+						</p>
+						
+						{!tool.disabled && (
+							<div class="mt-6 flex items-center text-sm font-semibold text-brand-600 dark:text-brand-400 relative z-10 group-hover:gap-2 gap-1 transition-all">
+								立即使用 
+								<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="group-hover:translate-x-1 transition-transform"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+							</div>
+						)}
+					</a>
+				))}
+			</div>
+		</section>
+	</div>
+</Layout>
