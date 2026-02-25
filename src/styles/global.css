@@ -1,6 +1,6 @@
 @import "tailwindcss";
 
-@custom-variant dark (&:where(body:has(#theme-toggle:checked), body:has(#theme-toggle:checked) *));
+@custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
   --color-brand-50: #eff6ff;
@@ -18,7 +18,7 @@
     background-color: transparent !important;
   }
 
-  body:has(#theme-toggle:checked) {
+  .dark body {
     @apply text-slate-100;
   }
 }
