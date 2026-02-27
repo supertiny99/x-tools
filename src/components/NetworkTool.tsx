@@ -14,6 +14,7 @@ interface NetworkInfo {
   localIPs: string[];
   userAgent: string;
   connectionType: string | null;
+  effectiveType: string | null;
   downlink: number | null;
   rtt: number | null;
   saveData: boolean | null;
@@ -114,6 +115,7 @@ export default function NetworkTool() {
     localIPs: [],
     userAgent: navigator.userAgent,
     connectionType: null,
+    effectiveType: null,
     downlink: null,
     rtt: null,
     saveData: null,
@@ -128,20 +130,27 @@ export default function NetworkTool() {
   const [refreshing, setRefreshing] = useState(false);
 
   // Get connection info from Network Information API
+  // Prefer conn.type (physical: wifi/ethernet/cellular) over conn.effectiveType
+  // (effectiveType is a bandwidth estimate: 4g/3g/2g — not the physical medium)
   const getConnectionInfo = useCallback(() => {
     const conn =
       (navigator as any).connection ||
       (navigator as any).mozConnection ||
       (navigator as any).webkitConnection;
     if (conn) {
+      // conn.type values: "wifi" | "ethernet" | "cellular" | "none" | "unknown"
+      // conn.effectiveType values: "4g" | "3g" | "2g" | "slow-2g"
+      const type = conn.type && conn.type !== "unknown" ? conn.type : null;
+      const effectiveType = conn.effectiveType ?? null;
       return {
-        connectionType: conn.effectiveType ?? conn.type ?? null,
+        connectionType: type ?? effectiveType ?? null,
+        effectiveType: effectiveType,
         downlink: conn.downlink ?? null,
         rtt: conn.rtt ?? null,
         saveData: conn.saveData ?? null,
       };
     }
-    return { connectionType: null, downlink: null, rtt: null, saveData: null };
+    return { connectionType: null, effectiveType: null, downlink: null, rtt: null, saveData: null };
   }, []);
 
   // Get local IPs via WebRTC
@@ -176,6 +185,26 @@ export default function NetworkTool() {
     return ips;
   }, []);
 
+  // Try to fetch IPv6 address via an IPv6-only endpoint
+  const fetchIPv6 = useCallback(async (): Promise<string | null> => {
+    // These endpoints only respond over IPv6; if the device has no IPv6, the request fails
+    const endpoints = [
+      "https://api6.ipify.org?format=json",
+      "https://v6.ident.me/.json",
+    ];
+    for (const url of endpoints) {
+      try {
+        const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
+        if (!res.ok) continue;
+        const data = await res.json();
+        const ip: string = data.ip ?? data.address ?? null;
+        // Validate it looks like an IPv6 address
+        if (ip && ip.includes(":")) return ip;
+      } catch (_) {}
+    }
+    return null;
+  }, []);
+
   // Fetch public IP info from ipapi.co
   const fetchIPInfo = useCallback(async () => {
     try {
@@ -192,7 +221,6 @@ export default function NetworkTool() {
         latitude: data.latitude ?? null,
         longitude: data.longitude ?? null,
         timezone: data.timezone ?? null,
-        ipv6: null as string | null,
       };
     } catch (_) {
       // fallback to ip-api.com
@@ -213,7 +241,6 @@ export default function NetworkTool() {
             latitude: data2.lat ?? null,
             longitude: data2.lon ?? null,
             timezone: data2.timezone ?? null,
-            ipv6: null as string | null,
           };
         }
       } catch (_) {}
@@ -253,19 +280,24 @@ export default function NetworkTool() {
   const loadAll = useCallback(async () => {
     setLoading(true);
     const connInfo = getConnectionInfo();
-    const [ipData, localIPs] = await Promise.all([fetchIPInfo(), getLocalIPs()]);
-    const latency = await measureLatency("https://www.cloudflare.com");
+    const [ipData, localIPs, ipv6, latency] = await Promise.all([
+      fetchIPInfo(),
+      getLocalIPs(),
+      fetchIPv6(),
+      measureLatency("https://www.cloudflare.com"),
+    ]);
     setInfo((prev) => ({
       ...prev,
       ...connInfo,
       ...(ipData ?? {}),
+      ipv6,
       localIPs,
       latency,
       online: navigator.onLine,
     }));
     setLoading(false);
     runPingTests();
-  }, [getConnectionInfo, fetchIPInfo, getLocalIPs, measureLatency, runPingTests]);
+  }, [getConnectionInfo, fetchIPInfo, fetchIPv6, getLocalIPs, measureLatency, runPingTests]);
 
   useEffect(() => {
     loadAll();
@@ -293,15 +325,17 @@ export default function NetworkTool() {
   };
 
   const connectionTypeLabel: Record<string, string> = {
-    "4g": "4G / WiFi",
-    "3g": "3G",
-    "2g": "2G",
-    slow_2g: "弱网 (2G)",
+    // Physical types (conn.type)
     wifi: "WiFi",
     ethernet: "有线网络",
     cellular: "移动网络",
     none: "无连接",
     unknown: "未知",
+    // Effective bandwidth types (conn.effectiveType) — shown separately
+    "4g": "4G 级别",
+    "3g": "3G 级别",
+    "2g": "2G 级别",
+    "slow-2g": "弱网",
   };
 
   return (
@@ -347,6 +381,7 @@ export default function NetworkTool() {
         {/* Public IP */}
         <InfoCard title="公网 IP 信息" icon="🌐">
           <InfoRow label="公网 IPv4" value={info.publicIP} loading={loading} mono />
+          <InfoRow label="公网 IPv6" value={info.ipv6} loading={loading} mono />
           <InfoRow label="ISP / 运营商" value={info.isp} loading={loading} />
           <InfoRow label="国家/地区" value={info.country ? `${info.country} ${info.countryCode ? `(${info.countryCode})` : ""}` : null} loading={loading} />
           <InfoRow label="省份 / 地区" value={info.region} loading={loading} />
@@ -371,6 +406,18 @@ export default function NetworkTool() {
             value={
               info.connectionType
                 ? connectionTypeLabel[info.connectionType] ?? info.connectionType
+                : null
+            }
+            loading={loading}
+          />
+          <InfoRow
+            label="带宽等级"
+            value={
+              info.effectiveType
+                ? (connectionTypeLabel[info.effectiveType] ?? info.effectiveType) +
+                  (info.effectiveType !== info.connectionType
+                    ? "（浏览器估算）"
+                    : "")
                 : null
             }
             loading={loading}
