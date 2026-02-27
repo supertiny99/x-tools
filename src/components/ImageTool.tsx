@@ -89,12 +89,39 @@ export default function ImageTool() {
         }
     }, [image]);
 
-    const loadImage = useCallback((file: File) => {
-        if (!file.type.startsWith('image/')) return;
-        const url = URL.createObjectURL(file);
+    const loadImage = useCallback(async (file: File) => {
+        let processFile = file;
+        const extension = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+        const isHeic = file.type === 'image/heic' || file.type === 'image/heif' || extension === '.heic' || extension === '.heif';
+
+        if (isHeic) {
+            setProcessing(true);
+            try {
+                const heic2anyModule = await import('heic2any');
+                const heic2any = heic2anyModule.default || heic2anyModule;
+                const convertedBlob = await heic2any({
+                    blob: file,
+                    toType: "image/jpeg",
+                    quality: 0.92
+                });
+
+                const blob = Array.isArray(convertedBlob) ? convertedBlob[0] : convertedBlob;
+                const newName = file.name.replace(/\.heic|\.heif/i, '.jpg');
+                processFile = new File([blob], newName, { type: 'image/jpeg' });
+            } catch (error) {
+                console.error('Failed to convert HEIC/HEIF', error);
+                setProcessing(false);
+                return;
+            }
+            setProcessing(false);
+        } else if (!processFile.type.startsWith('image/')) {
+            return;
+        }
+
+        const url = URL.createObjectURL(processFile);
         const img = new Image();
         img.onload = () => {
-            setImage({ file, src: url, width: img.width, height: img.height, name: file.name });
+            setImage({ file: processFile, src: url, width: img.width, height: img.height, name: processFile.name });
             setResultUrl('');
             setResultSize(0);
         };
@@ -120,9 +147,16 @@ export default function ImageTool() {
         const items = e.clipboardData?.items;
         if (!items) return;
         for (let i = 0; i < items.length; i++) {
-            if (items[i].type.startsWith('image/')) {
+            const itemType = items[i].type;
+            if (itemType.startsWith('image/') || itemType === '') {
                 const file = items[i].getAsFile();
-                if (file) { loadImage(file); break; }
+                if (file) {
+                    const ext = file.name.toLowerCase();
+                    if (itemType.startsWith('image/') || ext.endsWith('.heic') || ext.endsWith('.heif')) {
+                        loadImage(file);
+                        break;
+                    }
+                }
             }
         }
     }, [loadImage]);
@@ -398,7 +432,7 @@ export default function ImageTool() {
                                 onDrop={handleDrop}
                                 onClick={() => fileInputRef.current?.click()}
                             >
-                                <input type="file" className="hidden" accept="image/*" ref={fileInputRef} onChange={handleFileChange} />
+                                <input type="file" className="hidden" accept="image/*,.heic,.heif" ref={fileInputRef} onChange={handleFileChange} />
                                 {image ? (
                                     <div className="relative w-full flex flex-col items-center gap-3">
                                         <img
@@ -423,7 +457,7 @@ export default function ImageTool() {
                                             <FiUploadCloud />
                                         </div>
                                         <p className="font-semibold text-slate-700 dark:text-slate-200">点击上传 或 拖拽图片至此</p>
-                                        <p className="text-slate-400 text-sm">支持 JPG、PNG、WebP 等格式，也可 Ctrl+V 粘贴</p>
+                                        <p className="text-slate-400 text-sm">支持 JPG、PNG、WebP、HEIF/HEIC 等格式，也可 Ctrl+V 粘贴</p>
                                     </div>
                                 )}
                             </div>
