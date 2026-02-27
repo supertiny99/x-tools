@@ -1,0 +1,44 @@
+---
+import Layout from "../../layouts/Layout.astro";
+import ImageTool from "../../components/ImageTool";
+---
+
+<Layout title="图片处理" description="在线图片处理工具，支持格式转换、压缩、裁剪、缩放和添加水印，完全本地处理，安全可靠。">
+    <div
+        class="container mx-auto px-4 py-8 flex flex-col min-h-[calc(100vh-8rem)]"
+    >
+        <div class="mb-8">
+            <a
+                href="/"
+                class="inline-flex items-center text-sm font-medium text-slate-500 hover:text-brand-600 dark:hover:text-brand-400 transition-colors mb-4 gap-1"
+            >
+                <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    ><path d="m15 18-6-6 6-6"></path></svg
+                >
+                返回首页
+            </a>
+            <h1 class="text-3xl font-bold text-slate-900 dark:text-white mb-2">
+                图片处理工具
+            </h1>
+            <p class="text-slate-600 dark:text-slate-400">
+                支持图片格式转换、压缩、裁剪、缩放与水印添加，所有操作均在浏览器本地完成，数据绝对安全。
+            </p>
+        </div>
+
+        <!-- Tool Rendered on Client -->
+        <div
+            class="flex-grow flex flex-col relative w-full max-w-6xl mx-auto rounded-3xl glass-panel overflow-hidden shadow-2xl shadow-brand-500/10 border border-slate-200 dark:border-slate-800"
+        >
+            <ImageTool client:only="react" />
+        </div>
+    </div>
+</Layout>
