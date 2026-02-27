@@ -43,6 +43,12 @@ npm install
 npm run dev
 ```
 
+> ⚠️ **依赖安装注意事项 (Important Notes on Installation)**:
+> 
+> 请注意，在安装新的 npm 包时，务必锁定 npm 版本。为了避免后续使用 `npm ci` 部署（如在 Cloudflare Pages）时，因为 `tree-sitter` 等包的可选依赖问题导致构建失败：
+> - 建议**使用 npm 10 降级并锁定 lockfile 格式**（`lockfileVersion: 2` 等），以此避免某些环境下解析不同步的问题。
+> - 每次使用 `npm install <package>` 安装新包之后，如果发生过任何依赖变化，请务必在一并提交前重新运行一次 `npm install` 以确保 `package.json` 和 `package-lock.json` 的深度树形指纹完全一致。
+
 启动后可在浏览器打开 `http://localhost:4321`，你将在首页看到所有已集成的在线小工具列表（包括 WebRTC 和二维码工具），点击即可进入对应应用体验功能。
 
 ## 📦 构建与部署
