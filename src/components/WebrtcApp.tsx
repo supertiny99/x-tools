@@ -61,6 +61,9 @@ export default function WebrtcApp() {
     const remoteVideoRef = useRef<HTMLVideoElement>(null);
     const remoteAudioRef = useRef<HTMLAudioElement>(null);
     const callTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    // Buffers streams that arrive before the video DOM elements are mounted
+    const pendingRemoteStreamRef = useRef<MediaStream | null>(null);
+    const pendingLocalStreamRef = useRef<MediaStream | null>(null);
 
     // ── Peer Initialization ──────────────────────────────────────────────────
 
@@ -126,6 +129,23 @@ export default function WebrtcApp() {
         if (callState === 'active') {
             setCallDuration(0);
             callTimerRef.current = setInterval(() => setCallDuration((d) => d + 1), 1000);
+
+            // Flush any streams that arrived before the video panel was mounted
+            if (pendingRemoteStreamRef.current) {
+                if (callMode === 'video' && remoteVideoRef.current) {
+                    remoteVideoRef.current.srcObject = pendingRemoteStreamRef.current;
+                    remoteVideoRef.current.play().catch(() => {});
+                } else if (callMode === 'audio' && remoteAudioRef.current) {
+                    remoteAudioRef.current.srcObject = pendingRemoteStreamRef.current;
+                    remoteAudioRef.current.play().catch(() => {});
+                }
+                pendingRemoteStreamRef.current = null;
+            }
+            if (pendingLocalStreamRef.current && callMode === 'video' && localVideoRef.current) {
+                localVideoRef.current.srcObject = pendingLocalStreamRef.current;
+                localVideoRef.current.play().catch(() => {});
+                pendingLocalStreamRef.current = null;
+            }
         } else {
             if (callTimerRef.current) {
                 clearInterval(callTimerRef.current);
@@ -136,7 +156,7 @@ export default function WebrtcApp() {
         return () => {
             if (callTimerRef.current) clearInterval(callTimerRef.current);
         };
-    }, [callState]);
+    }, [callState, callMode]);
 
     // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -241,14 +261,20 @@ export default function WebrtcApp() {
 
     /**
      * Attach a MediaStream to a media element ref (video or audio).
+     * If the element is not yet mounted, store in the appropriate pending ref
+     * so the useEffect can flush it once callState → 'active' renders the DOM.
      */
     const attachStream = (
         ref: React.RefObject<HTMLVideoElement | HTMLAudioElement | null>,
         stream: MediaStream,
+        pendingRef?: React.MutableRefObject<MediaStream | null>,
     ) => {
-        if (!ref.current) return;
-        ref.current.srcObject = stream;
-        ref.current.play().catch(() => {/* autoplay policy — user gesture already happened */});
+        if (ref.current) {
+            ref.current.srcObject = stream;
+            ref.current.play().catch(() => {/* autoplay policy — user gesture already happened */});
+        } else if (pendingRef) {
+            pendingRef.current = stream;
+        }
     };
 
     /**
@@ -258,9 +284,13 @@ export default function WebrtcApp() {
         const mode: CallMode = call.metadata?.mode ?? 'audio';
         call.on('stream', (remoteStream) => {
             if (mode === 'video') {
-                attachStream(remoteVideoRef, remoteStream);
+                // Video panel is only rendered when callState === 'active' or 'calling'.
+                // The callee's state is still 'incoming' at this moment, so the <video>
+                // element may not be in the DOM yet — use the pending buffer as fallback.
+                attachStream(remoteVideoRef, remoteStream, pendingRemoteStreamRef);
             } else {
-                attachStream(remoteAudioRef, remoteStream);
+                // <audio> is always rendered, so the ref should be available.
+                attachStream(remoteAudioRef, remoteStream, pendingRemoteStreamRef);
             }
             setCallState('active');
             addSystemMessage('通话已接通');
@@ -280,6 +310,8 @@ export default function WebrtcApp() {
         if (localVideoRef.current) localVideoRef.current.srcObject = null;
         if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
         if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null;
+        pendingRemoteStreamRef.current = null;
+        pendingLocalStreamRef.current = null;
         mediaCallRef.current = null;
         setCallState('idle');
         setIsMuted(false);
@@ -304,7 +336,8 @@ export default function WebrtcApp() {
             localStreamRef.current = stream;
 
             if (mode === 'video') {
-                attachStream(localVideoRef, stream);
+                // callState is 'calling' here so the video panel IS rendered — ref is valid.
+                attachStream(localVideoRef, stream, pendingLocalStreamRef);
             }
 
             const call = peerRef.current.call(targetId.trim(), stream, {
@@ -336,7 +369,10 @@ export default function WebrtcApp() {
             localStreamRef.current = stream;
 
             if (callMode === 'video') {
-                attachStream(localVideoRef, stream);
+                // callState is still 'incoming' here, so the video panel is NOT rendered yet.
+                // Store in pendingLocalStreamRef to be flushed by the useEffect once
+                // setCallState('active') runs and the video elements mount.
+                attachStream(localVideoRef, stream, pendingLocalStreamRef);
             }
 
             call.answer(stream);
