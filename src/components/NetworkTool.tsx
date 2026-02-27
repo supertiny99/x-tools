@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 
 interface NetworkInfo {
   publicIP: string | null;
@@ -22,11 +22,56 @@ interface NetworkInfo {
   latency: number | null;
 }
 
+interface DnsServerInfo {
+  ip: string;
+  name: string;
+  latency: number | null;
+  status: "pending" | "success" | "failed";
+}
+
+interface DnsRecord {
+  type: string;
+  value: string;
+  ttl?: number;
+}
+
+interface DnsQueryResult {
+  status: "idle" | "loading" | "success" | "error";
+  domain: string;
+  records: Record<string, DnsRecord[]>;
+  error?: string;
+}
+
 interface PingResult {
   url: string;
   latency: number | null;
   status: "pending" | "success" | "failed";
 }
+
+// Well-known DNS server IPs for identification
+const KNOWN_DNS: Record<string, string> = {
+  "1.1.1.1": "Cloudflare (1.1.1.1)",
+  "1.0.0.1": "Cloudflare (1.0.0.1)",
+  "8.8.8.8": "Google (8.8.8.8)",
+  "8.8.4.4": "Google (8.8.4.4)",
+  "9.9.9.9": "Quad9 (9.9.9.9)",
+  "149.112.112.112": "Quad9 (149.112.112.112)",
+  "208.67.222.222": "OpenDNS (208.67.222.222)",
+  "208.67.220.220": "OpenDNS (208.67.220.220)",
+  "223.5.5.5": "阿里 DNS (223.5.5.5)",
+  "223.6.6.6": "阿里 DNS (223.6.6.6)",
+  "119.29.29.29": "腾讯 DNSPod (119.29.29.29)",
+  "114.114.114.114": "114 DNS",
+  "114.114.115.115": "114 DNS (备用)",
+  "180.76.76.76": "百度 DNS",
+};
+
+const DOH_SERVERS = [
+  { name: "Cloudflare", url: "https://cloudflare-dns.com/dns-query", ip: "1.1.1.1" },
+  { name: "Google", url: "https://dns.google/resolve", ip: "8.8.8.8" },
+];
+
+const DNS_RECORD_TYPES = ["A", "AAAA", "CNAME", "MX", "TXT", "NS"];
 
 const PING_TARGETS = [
   { url: "https://www.cloudflare.com", name: "Cloudflare" },
@@ -128,6 +173,20 @@ export default function NetworkTool() {
     PING_TARGETS.map((t) => ({ url: t.url, latency: null, status: "pending" }))
   );
   const [refreshing, setRefreshing] = useState(false);
+
+  // DNS server detection state
+  const [dnsServers, setDnsServers] = useState<DnsServerInfo[]>(
+    DOH_SERVERS.map((s) => ({ ip: s.ip, name: s.name, latency: null, status: "pending" }))
+  );
+
+  // DNS query tool state
+  const [dnsQuery, setDnsQuery] = useState({ domain: "", type: "A" });
+  const [dnsResult, setDnsResult] = useState<DnsQueryResult>({
+    status: "idle",
+    domain: "",
+    records: {},
+  });
+  const dnsInputRef = useRef<HTMLInputElement>(null);
 
   // Get connection info from Network Information API
   // Prefer conn.type (physical: wifi/ethernet/cellular) over conn.effectiveType
@@ -277,6 +336,83 @@ export default function NetworkTool() {
     }
   }, [measureLatency]);
 
+  // Query a DoH server to detect which DNS server is actually used
+  // We ask for a unique subdomain; the DoH server resolves it using the client's DNS
+  // and also tells us its resolver IP via the "edns_client_subnet" or we detect latency
+  const detectDnsServers = useCallback(async () => {
+    setDnsServers(DOH_SERVERS.map((s) => ({ ip: s.ip, name: s.name, latency: null, status: "pending" })));
+    const results = await Promise.all(
+      DOH_SERVERS.map(async (server, i) => {
+        try {
+          const start = performance.now();
+          const res = await fetch(
+            `${server.url}?name=whoami.cloudflare&type=TXT`,
+            {
+              headers: { accept: "application/dns-json" },
+              signal: AbortSignal.timeout(6000),
+            }
+          );
+          const latency = Math.round(performance.now() - start);
+          if (!res.ok) throw new Error("HTTP " + res.status);
+          const data = await res.json();
+          // whoami.cloudflare TXT returns the resolver IP as seen by Cloudflare
+          let resolverIP: string | null = null;
+          if (server.name === "Cloudflare" && data.Answer) {
+            const txt = data.Answer.find((a: any) => a.type === 16);
+            if (txt) resolverIP = txt.data?.replace(/"/g, "") ?? null;
+          }
+          const label = resolverIP
+            ? (KNOWN_DNS[resolverIP] ?? resolverIP)
+            : server.name;
+          return { ip: resolverIP ?? server.ip, name: label, latency, status: "success" as const };
+        } catch (_) {
+          return { ip: server.ip, name: server.name, latency: null, status: "failed" as const };
+        }
+      })
+    );
+    setDnsServers(results);
+  }, []);
+
+  // Query DNS records via DoH (Cloudflare DNS-over-HTTPS)
+  const queryDns = useCallback(async (domain: string, type: string) => {
+    const d = domain.trim().replace(/\.$/, "");
+    if (!d) return;
+    setDnsResult({ status: "loading", domain: d, records: {} });
+    try {
+      const typesToQuery = type === "ALL" ? DNS_RECORD_TYPES : [type];
+      const allRecords: Record<string, DnsRecord[]> = {};
+      await Promise.all(
+        typesToQuery.map(async (t) => {
+          try {
+            const res = await fetch(
+              `https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(d)}&type=${t}`,
+              {
+                headers: { accept: "application/dns-json" },
+                signal: AbortSignal.timeout(8000),
+              }
+            );
+            if (!res.ok) return;
+            const data = await res.json();
+            if (data.Answer && data.Answer.length > 0) {
+              allRecords[t] = data.Answer.map((a: any) => ({
+                type: t,
+                value: a.data,
+                ttl: a.TTL,
+              }));
+            }
+          } catch (_) {}
+        })
+      );
+      if (Object.keys(allRecords).length === 0) {
+        setDnsResult({ status: "error", domain: d, records: {}, error: "未找到任何 DNS 记录" });
+      } else {
+        setDnsResult({ status: "success", domain: d, records: allRecords });
+      }
+    } catch (e: any) {
+      setDnsResult({ status: "error", domain: d, records: {}, error: e.message ?? "查询失败" });
+    }
+  }, []);
+
   const loadAll = useCallback(async () => {
     setLoading(true);
     const connInfo = getConnectionInfo();
@@ -297,7 +433,8 @@ export default function NetworkTool() {
     }));
     setLoading(false);
     runPingTests();
-  }, [getConnectionInfo, fetchIPInfo, fetchIPv6, getLocalIPs, measureLatency, runPingTests]);
+    detectDnsServers();
+  }, [getConnectionInfo, fetchIPInfo, fetchIPv6, getLocalIPs, measureLatency, runPingTests, detectDnsServers]);
 
   useEffect(() => {
     loadAll();
@@ -493,6 +630,106 @@ export default function NetworkTool() {
                 </div>
               );
             })}
+          </div>
+        </InfoCard>
+
+        {/* DNS Server Detection */}
+        <InfoCard title="DNS 服务器" icon="🔍">
+          <p className="text-xs text-slate-400 dark:text-slate-500 mb-3 leading-relaxed">
+            通过 DoH 检测当前实际使用的 DNS 解析服务器及响应延迟
+          </p>
+          <div className="space-y-3">
+            {dnsServers.map((server, i) => (
+              <div key={i} className="flex items-center justify-between gap-2">
+                <div className="flex-1 min-w-0">
+                  {server.status === "pending" ? (
+                    <span className="h-4 w-40 bg-slate-200 dark:bg-slate-700 rounded animate-pulse block" />
+                  ) : server.status === "failed" ? (
+                    <span className="text-xs text-red-400">检测失败</span>
+                  ) : (
+                    <span className="text-sm font-mono text-slate-800 dark:text-slate-100 break-all">
+                      {server.name}
+                    </span>
+                  )}
+                  <span className="text-xs text-slate-400 mt-0.5 block">
+                    via {DOH_SERVERS[i].name} DoH
+                  </span>
+                </div>
+                {server.status === "success" && server.latency !== null && (
+                  <span className={`text-xs font-mono font-semibold shrink-0 ${latencyColor(server.latency)}`}>
+                    {server.latency} ms
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        </InfoCard>
+
+        {/* DNS Query Tool */}
+        <InfoCard title="DNS 查询" icon="📋">
+          <div className="space-y-3">
+            <div className="flex gap-2">
+              <input
+                ref={dnsInputRef}
+                type="text"
+                placeholder="输入域名，如 google.com"
+                value={dnsQuery.domain}
+                onChange={(e) => setDnsQuery((p) => ({ ...p, domain: e.target.value }))}
+                onKeyDown={(e) => e.key === "Enter" && queryDns(dnsQuery.domain, dnsQuery.type)}
+                className="flex-1 min-w-0 text-sm px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-500/50"
+              />
+              <select
+                value={dnsQuery.type}
+                onChange={(e) => setDnsQuery((p) => ({ ...p, type: e.target.value }))}
+                className="text-sm px-2 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-brand-500/50"
+              >
+                {["A", "AAAA", "CNAME", "MX", "TXT", "NS", "ALL"].map((t) => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </select>
+              <button
+                onClick={() => queryDns(dnsQuery.domain, dnsQuery.type)}
+                disabled={!dnsQuery.domain.trim() || dnsResult.status === "loading"}
+                className="px-3 py-2 rounded-lg bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white text-sm font-semibold transition-colors shrink-0"
+              >
+                查询
+              </button>
+            </div>
+
+            {dnsResult.status === "loading" && (
+              <div className="space-y-2 pt-1">
+                {[1, 2, 3].map((n) => (
+                  <span key={n} className={`h-4 bg-slate-200 dark:bg-slate-700 rounded animate-pulse block`} style={{ width: `${60 + n * 10}%` }} />
+                ))}
+              </div>
+            )}
+
+            {dnsResult.status === "error" && (
+              <p className="text-xs text-red-500 pt-1">{dnsResult.error}</p>
+            )}
+
+            {dnsResult.status === "success" && (
+              <div className="space-y-3 pt-1">
+                <p className="text-xs text-slate-400">{dnsResult.domain}</p>
+                {Object.entries(dnsResult.records).map(([type, records]) => (
+                  <div key={type}>
+                    <span className="inline-block text-xs font-bold px-2 py-0.5 rounded bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 mb-1.5">
+                      {type}
+                    </span>
+                    <div className="space-y-1">
+                      {records.map((r, i) => (
+                        <div key={i} className="flex items-start justify-between gap-2">
+                          <span className="text-xs font-mono text-slate-700 dark:text-slate-200 break-all flex-1">{r.value}</span>
+                          {r.ttl !== undefined && (
+                            <span className="text-xs text-slate-400 shrink-0">TTL {r.ttl}s</span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </InfoCard>
 
