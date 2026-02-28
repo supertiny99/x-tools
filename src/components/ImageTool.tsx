@@ -53,22 +53,22 @@ export default function ImageTool() {
     // Compress
     const [quality, setQuality] = useState(80);
 
-    // Crop
-    const [cropX, setCropX] = useState(0);
-    const [cropY, setCropY] = useState(0);
-    const [cropW, setCropW] = useState(0);
-    const [cropH, setCropH] = useState(0);
+    // Crop - use string type to allow empty input
+    const [cropX, setCropX] = useState('0');
+    const [cropY, setCropY] = useState('0');
+    const [cropW, setCropW] = useState('0');
+    const [cropH, setCropH] = useState('0');
 
-    // Resize
-    const [resizeW, setResizeW] = useState(0);
-    const [resizeH, setResizeH] = useState(0);
+    // Resize - use string type to allow empty input
+    const [resizeW, setResizeW] = useState('');
+    const [resizeH, setResizeH] = useState('');
     const [keepRatio, setKeepRatio] = useState(true);
 
     // Watermark
     const [watermarkText, setWatermarkText] = useState('水印文字');
     const [watermarkColor, setWatermarkColor] = useState('#ffffff');
     const [watermarkOpacity, setWatermarkOpacity] = useState(60);
-    const [watermarkSize, setWatermarkSize] = useState(32);
+    const [watermarkSize, setWatermarkSize] = useState('32');
     const [watermarkPosition, setWatermarkPosition] = useState<'center' | 'bottomRight' | 'bottomLeft' | 'topRight' | 'topLeft' | 'tile'>('bottomRight');
 
     // Reset result when tab or image changes
@@ -80,12 +80,12 @@ export default function ImageTool() {
     // Initialize crop/resize when image loads
     useEffect(() => {
         if (image) {
-            setCropX(0);
-            setCropY(0);
-            setCropW(image.width);
-            setCropH(image.height);
-            setResizeW(image.width);
-            setResizeH(image.height);
+            setCropX('0');
+            setCropY('0');
+            setCropW(String(image.width));
+            setCropH(String(image.height));
+            setResizeW(String(image.width));
+            setResizeH(String(image.height));
         }
     }, [image]);
 
@@ -228,10 +228,14 @@ export default function ImageTool() {
 
     const processCrop = async () => {
         if (!image) return;
-        const cw = Math.max(1, Math.min(cropW, image.width - cropX));
-        const ch = Math.max(1, Math.min(cropH, image.height - cropY));
-        const cx = Math.max(0, Math.min(cropX, image.width - 1));
-        const cy = Math.max(0, Math.min(cropY, image.height - 1));
+        const cxVal = Number(cropX) || 0;
+        const cyVal = Number(cropY) || 0;
+        const cwVal = Number(cropW) || 0;
+        const chVal = Number(cropH) || 0;
+        const cw = Math.max(1, Math.min(cwVal, image.width - cxVal));
+        const ch = Math.max(1, Math.min(chVal, image.height - cyVal));
+        const cx = Math.max(0, Math.min(cxVal, image.width - 1));
+        const cy = Math.max(0, Math.min(cyVal, image.height - 1));
         setProcessing(true);
         try {
             const img = await getImageBitmap();
@@ -253,8 +257,8 @@ export default function ImageTool() {
 
     const processResize = async () => {
         if (!image) return;
-        const rw = Math.max(1, resizeW);
-        const rh = Math.max(1, resizeH);
+        const rw = Math.max(1, Number(resizeW) || 1);
+        const rh = Math.max(1, Number(resizeH) || 1);
         setProcessing(true);
         try {
             const img = await getImageBitmap();
@@ -292,14 +296,14 @@ export default function ImageTool() {
             const b = parseInt(hex.substring(4, 6), 16);
             const alpha = watermarkOpacity / 100;
 
-            ctx.font = `bold ${watermarkSize}px Inter, Arial, sans-serif`;
+            ctx.font = `bold ${Number(watermarkSize) || 32}px Inter, Arial, sans-serif`;
             ctx.fillStyle = `rgba(${r},${g},${b},${alpha})`;
             ctx.textBaseline = 'middle';
 
             const padding = 20;
             const textMetrics = ctx.measureText(watermarkText);
             const textW = textMetrics.width;
-            const textH = watermarkSize;
+            const textH = Number(watermarkSize) || 32;
 
             if (watermarkPosition === 'tile') {
                 const stepX = textW + 60;
@@ -365,16 +369,22 @@ export default function ImageTool() {
         a.click();
     };
 
-    const handleResizeWidthChange = (val: number) => {
+    const handleResizeWidthChange = (val: string) => {
         setResizeW(val);
-        if (keepRatio && image) {
-            setResizeH(Math.round(val * image.height / image.width));
+        if (keepRatio && image && val !== '') {
+            const numVal = Number(val);
+            if (!isNaN(numVal)) {
+                setResizeH(String(Math.round(numVal * image.height / image.width)));
+            }
         }
     };
-    const handleResizeHeightChange = (val: number) => {
+    const handleResizeHeightChange = (val: string) => {
         setResizeH(val);
-        if (keepRatio && image) {
-            setResizeW(Math.round(val * image.width / image.height));
+        if (keepRatio && image && val !== '') {
+            const numVal = Number(val);
+            if (!isNaN(numVal)) {
+                setResizeW(String(Math.round(numVal * image.width / image.height)));
+            }
         }
     };
 
@@ -526,16 +536,24 @@ export default function ImageTool() {
                                         <h4 className="font-bold text-slate-800 dark:text-white flex items-center gap-2"><FiCrop className="text-brand-500" /> 裁剪区域</h4>
                                         <div className="grid grid-cols-2 gap-3">
                                             {[
-                                                { label: '起始 X', value: cropX, setter: setCropX, max: image.width - 1 },
-                                                { label: '起始 Y', value: cropY, setter: setCropY, max: image.height - 1 },
-                                                { label: '宽度', value: cropW, setter: setCropW, max: image.width },
-                                                { label: '高度', value: cropH, setter: setCropH, max: image.height },
-                                            ].map(({ label, value, setter, max }) => (
+                                                { label: '起始 X', value: cropX, setter: setCropX, max: image.width - 1, default: '0' },
+                                                { label: '起始 Y', value: cropY, setter: setCropY, max: image.height - 1, default: '0' },
+                                                { label: '宽度', value: cropW, setter: setCropW, max: image.width, default: '0' },
+                                                { label: '高度', value: cropH, setter: setCropH, max: image.height, default: '0' },
+                                            ].map(({ label, value, setter, max, default: defaultVal }) => (
                                                 <div key={label}>
                                                     <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">{label} <span className="text-slate-400">(0~{max})</span></label>
                                                     <input
-                                                        type="number" min={0} max={max} value={value}
-                                                        onChange={e => setter(Number(e.target.value))}
+                                                        type="number" min={0} max={max} value={value} step={1}
+                                                        onChange={e => setter(e.target.value)}
+                                                        onBlur={e => {
+                                                            const val = Number(e.target.value);
+                                                            if (isNaN(val) || e.target.value === '') {
+                                                                setter(defaultVal);
+                                                            } else {
+                                                                setter(String(Math.max(0, Math.min(max, val))));
+                                                            }
+                                                        }}
                                                         className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/50 text-slate-700 dark:text-slate-200"
                                                     />
                                                 </div>
@@ -553,16 +571,32 @@ export default function ImageTool() {
                                             <div>
                                                 <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">宽度 (px)</label>
                                                 <input
-                                                    type="number" min={1} value={resizeW}
-                                                    onChange={e => handleResizeWidthChange(Number(e.target.value))}
+                                                    type="number" min={1} value={resizeW} step={1}
+                                                    onChange={e => handleResizeWidthChange(e.target.value)}
+                                                    onBlur={e => {
+                                                        const val = Number(e.target.value);
+                                                        if (isNaN(val) || e.target.value === '' || val < 1) {
+                                                            setResizeW(String(image.width));
+                                                        } else {
+                                                            setResizeW(e.target.value);
+                                                        }
+                                                    }}
                                                     className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/50 text-slate-700 dark:text-slate-200"
                                                 />
                                             </div>
                                             <div>
                                                 <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">高度 (px)</label>
                                                 <input
-                                                    type="number" min={1} value={resizeH}
-                                                    onChange={e => handleResizeHeightChange(Number(e.target.value))}
+                                                    type="number" min={1} value={resizeH} step={1}
+                                                    onChange={e => handleResizeHeightChange(e.target.value)}
+                                                    onBlur={e => {
+                                                        const val = Number(e.target.value);
+                                                        if (isNaN(val) || e.target.value === '' || val < 1) {
+                                                            setResizeH(String(image.height));
+                                                        } else {
+                                                            setResizeH(e.target.value);
+                                                        }
+                                                    }}
                                                     className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/50 text-slate-700 dark:text-slate-200"
                                                 />
                                             </div>
@@ -606,8 +640,16 @@ export default function ImageTool() {
                                             <div>
                                                 <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">字体大小</label>
                                                 <input
-                                                    type="number" min={8} max={200} value={watermarkSize}
-                                                    onChange={e => setWatermarkSize(Number(e.target.value))}
+                                                    type="number" min={8} max={200} value={watermarkSize} step={1}
+                                                    onChange={e => setWatermarkSize(e.target.value)}
+                                                    onBlur={e => {
+                                                        const val = Number(e.target.value);
+                                                        if (isNaN(val) || e.target.value === '') {
+                                                            setWatermarkSize('32');
+                                                        } else {
+                                                            setWatermarkSize(String(Math.max(8, Math.min(200, val))));
+                                                        }
+                                                    }}
                                                     className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/50 text-slate-700 dark:text-slate-200"
                                                 />
                                             </div>
