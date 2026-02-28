@@ -13,11 +13,20 @@ const { title, description = "在线实用工具集合" } = Astro.props;
 <html lang="zh-CN" class="scroll-smooth">
 	<head>
 		<meta charset="UTF-8" />
-		<meta name="viewport" content="width=device-width" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
 		<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
 		<meta name="generator" content={Astro.generator} />
 		<meta name="description" content={description} />
 		<title>{title} | X-Tools</title>
+
+		<!-- PWA Meta Tags -->
+		<link rel="manifest" href="/manifest.json" />
+		<meta name="theme-color" content="#6366f1" />
+		<meta name="mobile-web-app-capable" content="yes" />
+		<meta name="apple-mobile-web-app-capable" content="yes" />
+		<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+		<meta name="apple-mobile-web-app-title" content="X-Tools" />
+		<link rel="apple-touch-icon" href="/icon-192.png" />
 
 		<!-- Theme initialization -->
 		<script is:inline>
@@ -113,9 +122,24 @@ const { title, description = "在线实用工具集合" } = Astro.props;
 						WebRTC 传连
 					</a>
 
+					<!-- PWA Install Button (hidden by default, shown via JS) -->
+					<button
+						id="pwa-install-btn"
+						class="hidden items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-full bg-brand-500/10 hover:bg-brand-500/20 text-brand-600 dark:text-brand-400 border border-brand-500/20 transition-colors cursor-pointer"
+						title="安装到桌面"
+						aria-label="安装到桌面"
+					>
+						<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+							<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+							<polyline points="7 10 12 15 17 10"></polyline>
+							<line x1="12" y1="15" x2="12" y2="3"></line>
+						</svg>
+						安装
+					</button>
+	
 					<div class="w-px h-5 bg-slate-200 dark:bg-slate-700 mx-2">
 					</div>
-
+	
 					<!-- Theme Toggle (Pure CSS Water Ripple + JS persist) -->
 					<button
 						id="theme-toggle"
@@ -213,6 +237,43 @@ const { title, description = "在线实用工具集合" } = Astro.props;
 			};
 
 			themeToggle?.addEventListener("click", handleToggleClick);
+		</script>
+
+		<!-- PWA Install Prompt Script -->
+		<script>
+			let deferredPrompt: Event & { prompt: () => Promise<void>; userChoice: Promise<{ outcome: string }> } | null = null;
+			const installBtn = document.getElementById("pwa-install-btn");
+
+			window.addEventListener("beforeinstallprompt", (e) => {
+				e.preventDefault();
+				deferredPrompt = e as typeof deferredPrompt;
+				// Show the install button
+				if (installBtn) {
+					installBtn.classList.remove("hidden");
+					installBtn.classList.add("flex");
+				}
+			});
+
+			installBtn?.addEventListener("click", async () => {
+				if (!deferredPrompt) return;
+				deferredPrompt.prompt();
+				const { outcome } = await deferredPrompt.userChoice;
+				if (outcome === "accepted") {
+					deferredPrompt = null;
+					if (installBtn) {
+						installBtn.classList.add("hidden");
+						installBtn.classList.remove("flex");
+					}
+				}
+			});
+
+			window.addEventListener("appinstalled", () => {
+				deferredPrompt = null;
+				if (installBtn) {
+					installBtn.classList.add("hidden");
+					installBtn.classList.remove("flex");
+				}
+			});
 		</script>
 	</body>
 </html>
