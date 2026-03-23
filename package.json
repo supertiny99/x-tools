@@ -4,6 +4,7 @@
   "version": "0.0.1",
   "scripts": {
     "dev": "astro dev",
+    "prebuild": "node -e \"try{require.resolve('@rollup/rollup-linux-x64-gnu')}catch(e){process.exit(1)}\" || npm i @rollup/rollup-linux-x64-gnu --no-save || true",
     "build": "astro build",
     "preview": "astro preview",
     "astro": "astro"
