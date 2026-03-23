@@ -107,6 +107,51 @@ interface CustomRuleInput {
   replacement: string;
 }
 
+interface MatchInfo {
+  start: number;
+  end: number;
+  original: string;
+  masked: string;
+}
+
+interface LineData {
+  segments: { text: string; hl: boolean }[];
+  changed: boolean;
+}
+
+function textToLineData(text: string, ranges: { start: number; end: number }[]): LineData[] {
+  const lines = text.split('\n');
+  const result: LineData[] = [];
+  let charOffset = 0;
+  let ri = 0;
+  for (const line of lines) {
+    const lineStart = charOffset;
+    const lineEnd = charOffset + line.length;
+    const segments: { text: string; hl: boolean }[] = [];
+    let linePos = lineStart;
+    let changed = false;
+    while (ri < ranges.length && ranges[ri].start < lineEnd) {
+      const range = ranges[ri];
+      if (range.start > linePos) {
+        segments.push({ text: text.slice(linePos, range.start), hl: false });
+      }
+      segments.push({ text: text.slice(range.start, range.end), hl: true });
+      changed = true;
+      linePos = range.end;
+      ri++;
+    }
+    if (linePos < lineEnd) {
+      segments.push({ text: text.slice(linePos, lineEnd), hl: false });
+    }
+    if (segments.length === 0) {
+      segments.push({ text: '', hl: false });
+    }
+    result.push({ segments, changed });
+    charOffset = lineEnd + 1;
+  }
+  return result;
+}
+
 const DEMO_TEXT = `尊敬的 张三 先生，您好！
 
 您的订单已确认，以下是您的个人信息核对：
@@ -131,6 +176,10 @@ export default function DesensitizeTool() {
   const [showCustom, setShowCustom] = useState(false);
   const [addressLevel, setAddressLevel] = useState<AddressLevel>('street');
   const addressLevelRef = useRef<AddressLevel>('street');
+  const [diffData, setDiffData] = useState<{ oldLines: LineData[]; newLines: LineData[] } | null>(null);
+  const leftScrollRef = useRef<HTMLDivElement>(null);
+  const rightScrollRef = useRef<HTMLDivElement>(null);
+  const scrollingRef = useRef(false);
   const [customRule, setCustomRule] = useState<CustomRuleInput>({
     name: '',
     pattern: '',
@@ -180,11 +229,11 @@ export default function DesensitizeTool() {
     if (!input.trim()) {
       setOutput('');
       setMatchCount(0);
+      setDiffData(null);
       return;
     }
 
     const addressMask = (m: string) => {
-      // group 1: admin prefix (省市区), group 2: street name, group 3: detail (number+building)
       const re = /((?:[\u4e00-\u9fa5]+(?:省|自治区))?(?:[\u4e00-\u9fa5]+(?:市|州|盟))?)((?:[\u4e00-\u9fa5]+(?:区|县|旗|镇|乡))?)([\u4e00-\u9fa5]+(?:路|街道?|大道|大街|巷|弄|胡同|里|村))?/;
       const parts = re.exec(m);
       if (!parts) return m;
@@ -195,22 +244,60 @@ export default function DesensitizeTool() {
       return admin + district + street + '****';
     };
 
-    let result = input;
-    let total = 0;
-
-    for (const rule of rules) {
+    // Collect all matches from the original text
+    const allMatches: (MatchInfo & { ruleIndex: number })[] = [];
+    for (let i = 0; i < rules.length; i++) {
+      const rule = rules[i];
       if (!rule.enabled) continue;
       const regex = new RegExp(rule.pattern.source, rule.pattern.flags);
-      const matches = result.match(regex);
-      if (matches) {
-        total += matches.length;
-        const maskFn = rule.id === 'address' ? addressMask : rule.mask;
-        result = result.replace(regex, (m) => maskFn(m));
+      const maskFn = rule.id === 'address' ? addressMask : rule.mask;
+      let match;
+      while ((match = regex.exec(input)) !== null) {
+        allMatches.push({
+          start: match.index,
+          end: match.index + match[0].length,
+          original: match[0],
+          masked: maskFn(match[0]),
+          ruleIndex: i,
+        });
+        if (!regex.global) break;
       }
     }
 
+    // Sort by position, then rule priority
+    allMatches.sort((a, b) => a.start - b.start || a.ruleIndex - b.ruleIndex);
+
+    // Remove overlapping matches (higher priority wins)
+    const filtered: MatchInfo[] = [];
+    let lastEnd = 0;
+    for (const m of allMatches) {
+      if (m.start >= lastEnd) {
+        filtered.push(m);
+        lastEnd = m.end;
+      }
+    }
+
+    // Build masked output and track ranges
+    let result = '';
+    let pos = 0;
+    const oldRanges: { start: number; end: number }[] = [];
+    const newRanges: { start: number; end: number }[] = [];
+    for (const m of filtered) {
+      result += input.slice(pos, m.start);
+      const newStart = result.length;
+      result += m.masked;
+      oldRanges.push({ start: m.start, end: m.end });
+      newRanges.push({ start: newStart, end: newStart + m.masked.length });
+      pos = m.end;
+    }
+    result += input.slice(pos);
+
     setOutput(result);
-    setMatchCount(total);
+    setMatchCount(filtered.length);
+    setDiffData({
+      oldLines: textToLineData(input, oldRanges),
+      newLines: textToLineData(result, newRanges),
+    });
   }, [input, rules]);
 
   const copyOutput = useCallback(async () => {
@@ -220,16 +307,32 @@ export default function DesensitizeTool() {
     setTimeout(() => setCopied(false), 2000);
   }, [output]);
 
+  const syncScroll = useCallback((source: 'left' | 'right') => {
+    return () => {
+      if (scrollingRef.current) return;
+      scrollingRef.current = true;
+      const from = source === 'left' ? leftScrollRef.current : rightScrollRef.current;
+      const to = source === 'left' ? rightScrollRef.current : leftScrollRef.current;
+      if (from && to) {
+        to.scrollTop = from.scrollTop;
+        to.scrollLeft = from.scrollLeft;
+      }
+      requestAnimationFrame(() => { scrollingRef.current = false; });
+    };
+  }, []);
+
   const clearAll = useCallback(() => {
     setInput('');
     setOutput('');
     setMatchCount(0);
+    setDiffData(null);
   }, []);
 
   const loadDemo = useCallback(() => {
     setInput(DEMO_TEXT);
     setOutput('');
     setMatchCount(0);
+    setDiffData(null);
   }, []);
 
   const enabledCount = rules.filter((r) => r.enabled).length;
@@ -402,11 +505,11 @@ export default function DesensitizeTool() {
           )}
         </div>
 
-        {/* 输出区 */}
+        {/* Diff 对比区 */}
         <div className="flex-1 flex flex-col min-h-0">
           <div className="flex items-center justify-between mb-2">
             <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
-              脱敏结果
+              脱敏对比
             </label>
             <button
               onClick={copyOutput}
@@ -414,16 +517,77 @@ export default function DesensitizeTool() {
               className="flex items-center gap-1 text-xs text-slate-500 hover:text-brand-600 dark:hover:text-brand-400 transition-colors disabled:opacity-30"
             >
               {copied ? <FiCheck size={12} className="text-emerald-500" /> : <FiCopy size={12} />}
-              {copied ? '已复制' : '复制'}
+              {copied ? '已复制' : '复制脱敏结果'}
             </button>
           </div>
-          <textarea
-            value={output}
-            readOnly
-            placeholder="脱敏后的文本将显示在此处..."
-            className="flex-1 w-full px-4 py-3 rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50/80 dark:bg-slate-800/20 text-slate-800 dark:text-slate-200 text-sm leading-relaxed font-mono resize-none focus:outline-none placeholder:text-slate-400 dark:placeholder:text-slate-500"
-            spellCheck={false}
-          />
+          {diffData ? (
+            <div className="flex-1 flex overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-700 min-h-0">
+              {/* 左侧：原始文本 */}
+              <div className="flex-1 flex flex-col min-w-0 border-r border-slate-200 dark:border-slate-700">
+                <div className="flex items-center gap-1.5 px-4 py-2 text-xs font-medium text-red-600 dark:text-red-400 bg-red-50/80 dark:bg-red-900/20 border-b border-slate-200 dark:border-slate-700 shrink-0">
+                  <span className="inline-block w-2 h-2 rounded-full bg-red-400 dark:bg-red-500" />
+                  原始文本
+                </div>
+                <div ref={leftScrollRef} onScroll={syncScroll('left')} className="flex-1 overflow-auto">
+                  <table className="w-full text-sm font-mono leading-relaxed">
+                    <tbody>
+                      {diffData.oldLines.map((line, i) => (
+                        <tr key={i} className={line.changed ? 'bg-red-50/60 dark:bg-red-900/10' : ''}>
+                          <td className="px-3 py-0 text-right text-[11px] text-slate-400/70 dark:text-slate-600 select-none w-8 align-top border-r border-slate-100 dark:border-slate-800">
+                            {i + 1}
+                          </td>
+                          <td className="px-3 py-0 whitespace-pre-wrap break-all">
+                            {line.segments.map((seg, j) =>
+                              seg.hl ? (
+                                <span key={j} className="bg-red-200/80 dark:bg-red-500/25 text-red-900 dark:text-red-300 rounded-sm px-px">{seg.text}</span>
+                              ) : (
+                                <span key={j} className="text-slate-700 dark:text-slate-300">{seg.text}</span>
+                              )
+                            )}
+                            {line.segments.length === 1 && line.segments[0].text === '' && '\u00A0'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              {/* 右侧：脱敏结果 */}
+              <div className="flex-1 flex flex-col min-w-0">
+                <div className="flex items-center gap-1.5 px-4 py-2 text-xs font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-50/80 dark:bg-emerald-900/20 border-b border-slate-200 dark:border-slate-700 shrink-0">
+                  <span className="inline-block w-2 h-2 rounded-full bg-emerald-400 dark:bg-emerald-500" />
+                  脱敏结果
+                </div>
+                <div ref={rightScrollRef} onScroll={syncScroll('right')} className="flex-1 overflow-auto">
+                  <table className="w-full text-sm font-mono leading-relaxed">
+                    <tbody>
+                      {diffData.newLines.map((line, i) => (
+                        <tr key={i} className={line.changed ? 'bg-emerald-50/60 dark:bg-emerald-900/10' : ''}>
+                          <td className="px-3 py-0 text-right text-[11px] text-slate-400/70 dark:text-slate-600 select-none w-8 align-top border-r border-slate-100 dark:border-slate-800">
+                            {i + 1}
+                          </td>
+                          <td className="px-3 py-0 whitespace-pre-wrap break-all">
+                            {line.segments.map((seg, j) =>
+                              seg.hl ? (
+                                <span key={j} className="bg-emerald-200/80 dark:bg-emerald-500/25 text-emerald-900 dark:text-emerald-300 rounded-sm px-px">{seg.text}</span>
+                              ) : (
+                                <span key={j} className="text-slate-700 dark:text-slate-300">{seg.text}</span>
+                              )
+                            )}
+                            {line.segments.length === 1 && line.segments[0].text === '' && '\u00A0'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="flex-1 flex items-center justify-center rounded-2xl border border-dashed border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/20">
+              <p className="text-sm text-slate-400 dark:text-slate-500">脱敏对比结果将显示在此处...</p>
+            </div>
+          )}
         </div>
       </div>
     </div>
