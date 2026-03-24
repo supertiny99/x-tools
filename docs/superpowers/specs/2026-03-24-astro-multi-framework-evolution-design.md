@@ -1,131 +1,131 @@
-# Astro Multi-Framework Evolution Design
+# Astro 多框架渐进演进设计
 
-## Background
+## 背景
 
-The current project is an Astro-based online tools site where each tool page is rendered through Astro routes and the actual interactive logic is implemented with React components.
+当前项目是一个基于 Astro 构建的在线工具站。页面路由和站点外壳由 Astro 提供，各个工具的交互逻辑主要通过 React 组件实现。
 
-This works well for delivery speed, but it does not yet reflect Astro's broader value as a framework orchestrator that can host multiple UI islands and runtime models in one site. The next phase should not optimize for framework variety as a vanity metric. Instead, it should optimize for tool fit, delivery efficiency, and long-term maintainability while allowing multiple frameworks to coexist naturally.
+这种方式在交付效率上没有问题，但还没有真正体现 Astro 作为“多框架编排层”的价值。下一阶段不应把“框架种类多”当成目标本身，而应优先考虑工具适配度、交付效率和长期可维护性，让多框架共存成为自然结果。
 
-## Goal
+## 目标
 
-Evolve the project from "Astro + React tools site" into "Astro-centered tools platform" where:
+将项目从“Astro + React 工具站”逐步演进为“以 Astro 为中心的工具平台”，具体目标如下：
 
-- Astro remains the routing, layout, static generation, PWA, and content shell.
-- Existing React tools continue to work unchanged unless there is a concrete reason to refactor them.
-- New tools can be implemented in React, Vue, Svelte, or framework-light patterns based on the tool's actual needs.
-- Shared browser logic gradually moves out of framework components so future tools are easier to build across different UI layers.
+- Astro 继续承担路由、布局、静态生成、PWA 和站点外壳能力。
+- 已有 React 工具在没有明确收益前不做迁移。
+- 新增工具可以根据实际需求选择 React、Vue、Svelte 或更轻量的浏览器原生实现。
+- 可复用的浏览器逻辑逐步从框架组件中抽离出来，方便未来跨框架复用。
 
-## Non-Goals
+## 非目标
 
-- Rewriting existing React tools for the sake of framework diversity.
-- Enforcing equal distribution of frameworks across the project.
-- Introducing a monorepo or package workspace before the project actually needs it.
-- Building a generic plugin system before a repeatable second framework path exists.
+- 为了展示多框架而重写现有 React 工具。
+- 强行追求各个框架数量平均分布。
+- 在项目规模尚小时就引入 monorepo 或 workspace。
+- 在还没有形成第二条稳定实现路径前，提前设计通用插件系统。
 
-## Current State
+## 当前状态
 
-The repository is a single Astro application with:
+当前仓库是一个单体 Astro 应用，主要结构包括：
 
-- Astro pages in `src/pages`
-- a shared layout in `src/layouts`
-- React tool implementations in `src/components`
-- styling and site shell concerns already handled centrally
+- `src/pages` 中的 Astro 页面路由
+- `src/layouts` 中的共享布局
+- `src/components` 中的 React 工具实现
+- 已经集中处理的站点样式与公共外壳
 
-This is a healthy starting point for gradual evolution because the page shell is already separated from tool internals.
+这其实是一个很适合渐进演进的起点，因为页面层和工具内部逻辑已经有了初步分离。
 
-## Approaches Considered
+## 方案对比
 
-### Approach A: Keep React for everything
+### 方案 A：继续全部使用 React
 
-Continue building all current and future tools in React while keeping Astro only as the page shell.
+后续所有工具都仍然使用 React 实现，Astro 只作为页面壳存在。
 
-Pros:
+优点：
 
-- Lowest short-term friction
-- No new framework onboarding
-- Reuses existing conventions fully
+- 短期成本最低
+- 不需要引入新的框架认知负担
+- 可以完全复用当前习惯
 
-Cons:
+缺点：
 
-- Does not realize Astro's multi-framework strengths
-- Over time, framework choice becomes accidental rather than intentional
-- Makes it harder to validate whether some tool types are better served by lighter alternatives
+- 无法体现 Astro 的多框架优势
+- 框架选择会逐渐变成默认惯性，而不是明确判断
+- 很难验证某些工具是否更适合更轻量或表达力更强的方案
 
-### Approach B: Practical gradual evolution
+### 方案 B：实用优先的渐进演进
 
-Keep existing React tools, but from now on structure new work so tool logic can be shared more easily and framework choice is made per tool.
+保留现有 React 工具不动，但从现在开始让新工具按实际需求选框架，并逐步抽离可复用逻辑。
 
-Pros:
+优点：
 
-- Matches the "practicality first" direction
-- Avoids churn on working tools
-- Builds toward multi-framework support without forcing migration work
-- Lets the project showcase Astro honestly through real use cases
+- 与“实用性优先”的方向一致
+- 不会对已上线工具造成无谓扰动
+- 可以在不重写旧代码的前提下逐步走向多框架
+- 能以真实业务场景体现 Astro 的价值，而不是人为堆技术
 
-Cons:
+缺点：
 
-- Requires discipline in how new tools are structured
-- Shared abstractions will emerge gradually instead of all at once
+- 需要对新工具的组织方式保持一定约束
+- 共享抽象会是逐步形成的，而不是一次性设计完成
 
-### Approach C: Immediate architectural reset
+### 方案 C：立即做架构级重构
 
-Refactor existing tools into a fully abstracted "core + adapters" system before adding more tools.
+先将现有工具统一重构为“core + adapter”体系，再继续新增工具。
 
-Pros:
+优点：
 
-- Cleanest long-term model on paper
-- Maximizes reuse potential early
+- 从长期架构视角看更整齐
+- 更早获得理论上的复用能力
 
-Cons:
+缺点：
 
-- Expensive and risky relative to current project size
-- Delays visible product progress
-- Likely over-engineering before enough variation exists
+- 以当前项目规模来看成本过高
+- 会明显延迟新功能交付
+- 容易在真实需求出现前过度设计
 
-## Recommendation
+## 推荐方案
 
-Choose Approach B: practical gradual evolution.
+推荐采用方案 B：实用优先的渐进演进。
 
-This gives the project a clear technical direction without paying the cost of rewriting already-valuable tools. It also aligns with Astro's strengths in a credible way: Astro becomes the stable site platform, and individual tools choose their runtime and UI technology based on problem fit instead of ideology.
+这个方案既给项目建立了明确的技术方向，又避免为了“看起来更先进”去重写已经可用的工具。Astro 继续作为稳定的平台层存在，而具体工具根据问题类型选择更合适的实现方式。
 
-## Proposed Architecture
+## 建议架构
 
-### Site responsibilities
+### 站点层职责
 
-Astro remains responsible for:
+Astro 持续负责以下内容：
 
-- page routes
-- shared layout and navigation
-- metadata and SEO
-- static output and deployment
-- PWA integration
-- top-level content composition
+- 页面路由
+- 共享布局与导航
+- 元数据与 SEO
+- 静态构建与部署输出
+- PWA 能力
+- 顶层内容编排
 
-### Tool responsibilities
+### 工具层职责
 
-Each tool should be treated as a feature slice with three conceptual layers:
+每个工具都应被视为一个独立功能切片，建议按三层理解：
 
-1. Route layer
-   - Astro page file
-   - tool metadata
-   - page copy and shell
+1. 路由层
+   - Astro 页面文件
+   - 工具元信息
+   - 页面文案与外壳
 
-2. UI layer
-   - React, Vue, Svelte, or a lightweight browser-native implementation
-   - framework-specific state and rendering
-   - user interaction orchestration
+2. UI 层
+   - React、Vue、Svelte 或浏览器原生实现
+   - 框架相关状态管理与渲染
+   - 用户交互编排
 
-3. Core layer
-   - framework-agnostic TypeScript utilities
-   - parsing, transformation, validation, browser API wrappers, and pure business logic
+3. Core 层
+   - 与框架无关的 TypeScript 逻辑
+   - 解析、转换、校验、浏览器 API 封装及纯业务逻辑
 
-Not every tool needs an explicit core module on day one. The rule is simpler: if logic could reasonably be reused across frameworks, tested independently, or moved without changing behavior, it should not stay buried in a framework component forever.
+并不是每个工具一开始都必须显式创建 `core` 目录。更实际的判断标准是：如果某段逻辑有复用可能、适合单独测试、或者未来可以在不同框架之间迁移，那它就不应该长期埋在某个框架组件内部。
 
-## Directory Direction
+## 目录演进方向
 
-The current structure can evolve without disruptive moves.
+现有结构不需要立刻大搬迁，但新代码可以开始往更清晰的方向收敛。
 
-Recommended direction:
+建议逐步演进到如下组织方式：
 
 ```text
 src/
@@ -147,190 +147,188 @@ src/
       vue/
 ```
 
-Guidelines:
+约束原则：
 
-- Keep Astro pages in `src/pages/tools`.
-- Move tool implementation details out of the flat `src/components` directory over time.
-- Organize by tool first, framework second.
-- Keep framework-neutral logic in `core` only when it provides real reuse or clarity.
+- Astro 页面继续放在 `src/pages/tools`
+- 工具实现细节逐步从扁平的 `src/components` 迁出
+- 目录组织以“工具”为第一维，以“框架”为第二维
+- `core` 只在真正带来清晰度或复用价值时引入
 
-This avoids a future where framework folders become the primary architecture, which would make the project harder to reason about as a product.
+这样可以避免未来项目变成“按框架分堆”，从而削弱产品维度上的可理解性。
 
-## Framework Selection Rules
+## 框架选型规则
 
-Framework choice should be explicit but lightweight. Use the smallest tool that still fits the problem well.
+框架选择应该明确，但不应沉重。原则是使用能解决问题的最小合适工具。
 
-### Prefer React when
+### 适合继续使用 React 的情况
 
-- the tool already depends on mature React-only libraries
-- interaction state is complex and current team velocity is best in React
-- migration cost would be higher than the benefit
+- 当前工具依赖成熟的 React 生态库
+- 交互状态较复杂，现阶段团队在 React 上效率最高
+- 迁移成本明显大于收益
 
-Examples in the current codebase that can remain React:
+当前项目中可继续保留 React 的典型工具：
 
-- WebRTC communication
-- Swagger/OpenAPI viewer using Monaco and Swagger UI
-- image processing with heavier UI controls
+- WebRTC 通信工具
+- 集成 Monaco 与 Swagger UI 的 OpenAPI 工具
+- 控件较多的图片处理工具
 
-### Prefer Vue when
+### 适合使用 Vue 的情况
 
-- the tool is form-heavy or workflow-heavy
-- template readability and local state expression are more important than external ecosystem constraints
-- the feature would benefit from concise reactivity without heavy custom hooks
+- 工具以表单、配置流或规则编辑为主
+- 模板可读性和本地状态表达比外部生态更重要
+- 希望用更直接的响应式写法降低复杂度
 
-Good future candidates:
+未来适合 Vue 的工具类型示例：
 
-- structured converters
-- config editors
-- rule-based text processors
+- 结构化转换器
+- 配置编辑器
+- 规则驱动的文本处理工具
 
-### Prefer Svelte when
+### 适合使用 Svelte 的情况
 
-- the interaction is compact and animation or responsiveness matters
-- the tool has modest complexity and benefits from minimal component overhead
-- a smaller mental model improves maintainability
+- 工具交互相对轻量，但对灵活性和响应速度有要求
+- 工具本身不重，适合更小的组件心智负担
+- 动效或轻交互体验比较重要
 
-Good future candidates:
+未来适合 Svelte 的工具类型示例：
 
-- calculators
-- visual mini-tools
-- lightweight editors or generators
+- 小型计算器
+- 视觉化轻工具
+- 轻量编辑器或生成器
 
-### Prefer browser-native or Web Components when
+### 适合使用浏览器原生或 Web Components 的情况
 
-- the tool is very small
-- interaction can be handled with minimal local state
-- framework runtime cost would outweigh the feature
+- 工具体量很小
+- 状态简单，本地逻辑足够轻
+- 引入框架运行时反而显得过重
 
-Good future candidates:
+未来适合该方案的工具类型示例：
 
-- clipboard helpers
-- simple encoders/decoders
-- small inspection widgets
+- 剪贴板辅助类工具
+- 简单编码解码工具
+- 小型检测或展示组件
 
-## Migration Principles
+## 演进原则
 
-### Existing tools
+### 对现有工具
 
-- Do not migrate working React tools without a specific product or maintenance reason.
-- Only extract shared logic from existing tools when touching them for new feature work or bug fixing.
-- Refactoring should happen opportunistically, not as a standalone rewrite campaign.
+- 没有明确产品收益或维护收益时，不迁移现有 React 工具。
+- 仅在修 bug、加功能、或代码明显需要整理时，顺手提取共享逻辑。
+- 重构应以机会式演进为主，而不是单独发起全面重写。
 
-### New tools
+### 对新增工具
 
-- Choose framework based on fit, not balancing counts.
-- If a tool uses mostly browser APIs and simple local state, start by asking whether React is actually necessary.
-- If the chosen framework depends on reusable parsing or transformation logic, place that logic in a tool-local `core` module immediately.
+- 按适配度选框架，而不是按“数量平衡”选框架。
+- 如果一个工具主要依赖浏览器 API 且状态简单，需要先判断 React 是否真有必要。
+- 如果工具内存在明显可复用的解析或转换逻辑，应从一开始就放入工具局部的 `core` 模块。
 
-### Shared utilities
+### 对共享工具层
 
-Introduce shared utilities only after repetition becomes real. Likely candidates include:
+共享能力只在“重复已经真实出现”时才抽象。较有可能逐步沉淀的方向包括：
 
-- file import/export helpers
-- clipboard wrappers
-- canvas and image helpers
-- browser capability detection
-- URL state persistence
-- reusable text transformation primitives
+- 文件导入导出辅助
+- 剪贴板封装
+- canvas 与图片处理辅助
+- 浏览器能力检测
+- URL 状态持久化
+- 文本转换基础能力
 
-These should live in shared modules only when at least two tools benefit clearly.
+只有在至少两个工具明确受益时，才应把这些能力提升为共享模块。
 
-## User-Facing Positioning
+## 面向用户的表达方式
 
-The homepage and tool detail pages can gradually expose implementation metadata, but this should remain secondary to usefulness.
+首页和工具详情页可以逐步暴露实现信息，但应始终把“工具是否有用”放在第一位。
 
-Recommended additions over time:
+后续可以考虑的增强点：
 
-- a small badge showing the implementation approach for each tool
-- a short site statement explaining that Astro powers a practical multi-framework toolbox
-- optional filtering by tool category rather than by framework
+- 为每个工具增加一个轻量的实现方式标签
+- 在站点说明中补一句项目定位，强调 Astro 负责统一承载多种实现方式
+- 工具筛选优先按用途分类，而不是按框架分类
 
-The project should communicate:
+项目对外更适合表达为：
 
-"Different tools use the most suitable frontend model, while Astro keeps the overall site cohesive."
+“不同工具采用最合适的前端实现方式，由 Astro 统一承载。”
 
-That is stronger than saying:
+这比单纯强调“这个项目用了很多框架”更有说服力。
 
-"This project uses many frameworks."
+## 推进阶段
 
-## Delivery Plan
+### 第一阶段：把路径打通
 
-### Phase 1: Enable the path
+- 只有在下一个工具确实需要时，再引入新的 Astro 框架集成
+- 保持当前 React 体系不动
+- 先确立新工具的目录组织规范
 
-- add additional Astro integrations only when needed by the next tool
-- keep the current React setup intact
-- define the tool-slice directory pattern for all new tools
+### 第二阶段：建立第一个非 React 范例
 
-### Phase 2: Establish one non-React exemplar
+- 按真实适配度新增一个 Vue、Svelte 或原生实现的工具
+- 在该工具中形成一套可重复的实现路径
+- 通过这个范例校准样式、hydration 和共享能力的边界
 
-- add a new tool in Vue, Svelte, or browser-native form based on real fit
-- keep its logic structured so the site now has a repeatable second path
-- use that tool to refine conventions for styling, hydration, and shared helpers
+### 第三阶段：有节制地沉淀共享逻辑
 
-### Phase 3: Grow shared logic deliberately
+- 在修改已有工具时，顺手抽离重复逻辑
+- 只有在重复被验证后再做共享模块
+- 在没有足够案例前，不要过早建立大而全的框架无关抽象层
 
-- extract repeated browser logic from touched tools
-- introduce shared utilities only after duplication proves the need
-- avoid broad framework-agnostic abstraction layers until multiple examples justify them
+## 风险与应对
 
-## Risks and Mitigations
+### 风险：框架扩散
 
-### Risk: Framework sprawl
+如果每个新工具都随意选择不同技术栈，维护成本会快速上升。
 
-If every new tool picks a different stack without rules, maintenance cost rises.
+应对方式：
 
-Mitigation:
+- 每次引入新框架时都给出简短理由
+- 除非新方案明显更合适，否则优先沿用现有可行方案
 
-- require a short rationale for each new framework choice
-- prefer the existing framework unless another option is meaningfully better
+### 风险：跨工具重复实现
 
-### Risk: Hidden duplication
+如果没有组织约束，不同框架下可能会重复写相同逻辑。
 
-Without structure, logic will be copied across tools in different frameworks.
+应对方式：
 
-Mitigation:
+- 在新工具评审时关注是否存在可提取的 `core` 逻辑
+- 只提取已经被证明重复的部分
 
-- review new tools for extractable `core` logic
-- extract only proven repetitions
+### 风险：过早抽象
 
-### Risk: Premature abstraction
+如果过早追求所有工具都框架无关，会拖慢交付节奏。
 
-Trying to make every tool framework-agnostic too early can slow delivery.
+应对方式：
 
-Mitigation:
+- 只抽取当前确实有价值的边界
+- 先在工具局部收敛，再决定是否提升到全局共享
 
-- only extract seams that serve an immediate need
-- keep abstractions local before making them global
+## 测试与质量方向
 
-## Testing and Quality Direction
+当前项目还没有完整测试体系。随着多框架共存，测试重点应更偏向框架无关逻辑，而不是过度依赖 UI 层测试。
 
-The current project does not yet have a test harness. As multi-framework usage grows, testing should focus more on framework-agnostic logic than UI implementation details.
+建议方向：
 
-Recommended direction:
+- 优先为纯 `core` 逻辑补测试
+- 仅在交互复杂且风险较高时增加组件测试
+- 保持框架相关渲染测试精简且聚焦
 
-- add tests first for pure `core` logic
-- use lightweight component tests only where interaction behavior is non-trivial
-- keep framework-specific rendering tests focused and sparse
+这样既能支持未来的多框架演进，也不会在当前阶段引入过重的测试负担。
 
-This supports the gradual move toward multi-framework development without forcing a full testing migration before the project is ready.
+## 成功标准
 
-## Success Criteria
+满足以下条件时，可以认为这次设计是成功的：
 
-This design is successful when:
+- 现有 React 工具可以继续稳定迭代
+- 新工具不再默认只能用 React
+- 后续至少有一个非 React 工具形成可复用范式
+- 可复用逻辑逐步沉淀到明确位置，而不是散落在各框架组件内部
+- 项目展示的是 Astro 在实际决策中的价值，而不是形式上的框架堆叠
 
-- existing React tools continue shipping without disruption
-- new tools can be added without assuming React by default
-- at least one future tool establishes a clean non-React path inside the same Astro site
-- shared logic starts to accumulate in intentional places rather than inside framework components
-- the site demonstrates Astro's strengths through practical decisions, not artificial framework variety
+## 最终决策
 
-## Decision
+采用“实用优先的渐进演进”路线：
 
-Adopt a practical gradual evolution model:
+- 保留现有 React 工具
+- 继续由 Astro 作为平台层统一承载
+- 新工具按适配度选择框架
+- 通过逐步提取可复用逻辑来支持未来扩展，而不是先发起一次大重构
 
-- keep current React tools
-- keep Astro as the primary platform layer
-- choose frameworks per tool based on product fit
-- introduce structure that supports reuse without triggering a rewrite
-
-This gives the project a credible, maintainable way to grow beyond React while preserving speed and keeping Astro at the center of the architecture.
+这条路线能在不牺牲当前交付速度的前提下，让项目自然成长为一个更能体现 Astro 能力的多实现方式工具平台。
