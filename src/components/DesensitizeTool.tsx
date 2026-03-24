@@ -1,156 +1,18 @@
 import React, { useState, useCallback, useRef } from 'react';
 import { FiShield, FiCopy, FiCheck, FiTrash2, FiPlus, FiX, FiChevronDown } from 'react-icons/fi';
+import {
+  buildDiffData,
+  createBuiltinRules,
+  createCustomRule,
+  desensitizeText,
+} from '../lib/desensitize';
+import type { AddressLevel, CustomRuleInput, LineData, MaskRule } from '../lib/desensitize';
 
-interface MaskRule {
-  id: string;
-  name: string;
-  enabled: boolean;
-  builtin: boolean;
-  pattern: RegExp;
-  mask: (match: string) => string;
-}
-
-// 常见中文姓氏（精简高频集，减少误匹配）
-const CN_SURNAMES = '王李张刘陈杨黄赵周吴徐孙马胡朱郭何罗高梁郑谢宋唐韩曹许邓冯曾蔡彭潘袁董余苏叶吕蒋田丁沈姜范江傅钟卢汪戴崔任陆廖姚方金邱谭韦贾邹熊孟秦阎薛侯雷龙段郝邵毛';
-const NAME_RE = new RegExp(`(?<=[\\s，。！？、；：""''（）《》\\n]|^)[${CN_SURNAMES}][\\u4e00-\\u9fa5]{1,2}(?=[\\s，。！？、；：""''（）《》先女男老小同\\n]|$)`, 'gm');
-
-const builtinRules: MaskRule[] = [
-  {
-    id: 'phone',
-    name: '手机号',
-    enabled: true,
-    builtin: true,
-    pattern: /(?<!\d)(1[3-9]\d)\d{4}(\d{4})(?!\d)/g,
-    mask: (m) => {
-      const match = /^(1[3-9]\d)\d{4}(\d{4})$/.exec(m);
-      return match ? `${match[1]}****${match[2]}` : m;
-    },
-  },
-  {
-    id: 'idcard',
-    name: '身份证号',
-    enabled: true,
-    builtin: true,
-    pattern: /(?<!\d)(\d{6})\d{8}(\d{3}[\dXx])(?!\d)/g,
-    mask: (m) => {
-      const match = /^(\d{6})\d{8}(\d{3}[\dXx])$/.exec(m);
-      return match ? `${match[1]}********${match[2]}` : m;
-    },
-  },
-  {
-    id: 'email',
-    name: '邮箱地址',
-    enabled: true,
-    builtin: true,
-    pattern: /([a-zA-Z0-9._%+-])[a-zA-Z0-9._%+-]*(@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/g,
-    mask: (m) => {
-      const match = /^([a-zA-Z0-9._%+-])[a-zA-Z0-9._%+-]*(@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})$/.exec(m);
-      return match ? `${match[1]}***${match[2]}` : m;
-    },
-  },
-  {
-    id: 'bankcard',
-    name: '银行卡号',
-    enabled: true,
-    builtin: true,
-    pattern: /(?<!\d)(\d{4})\d{4,12}(\d{4})(?!\d)/g,
-    mask: (m) => {
-      const match = /^(\d{4})\d{4,12}(\d{4})$/.exec(m);
-      return match ? `${match[1]}****${match[2]}` : m;
-    },
-  },
-  {
-    id: 'name_cn',
-    name: '中文姓名',
-    enabled: true,
-    builtin: true,
-    pattern: NAME_RE,
-    mask: (m) => {
-      if (m.length === 2) return m[0] + '*';
-      if (m.length === 3) return m[0] + '*' + m[2];
-      if (m.length === 4) return m[0] + '**' + m[3];
-      return m[0] + '*'.repeat(m.length - 2) + m[m.length - 1];
-    },
-  },
-  {
-    id: 'ipv4',
-    name: 'IPv4 地址',
-    enabled: true,
-    builtin: true,
-    pattern: /(?<!\d)(\d{1,3})\.(\d{1,3})\.\d{1,3}\.\d{1,3}(?!\d)/g,
-    mask: (m) => {
-      const match = /^(\d{1,3})\.(\d{1,3})\.\d{1,3}\.\d{1,3}$/.exec(m);
-      return match ? `${match[1]}.${match[2]}.*.*` : m;
-    },
-  },
-  {
-    id: 'address',
-    name: '详细地址',
-    enabled: true,
-    builtin: true,
-    // 要求：至少包含街道名+门牌号数字，避免匹配普通中文
-    pattern: /((?:[\u4e00-\u9fa5]+(?:省|自治区))?(?:[\u4e00-\u9fa5]+(?:市|州|盟))?(?:[\u4e00-\u9fa5]+(?:区|县|旗|镇|乡))?)([\u4e00-\u9fa5]{2,}(?:路|街道?|大道|大街|巷|弄|胡同|里|村))(\d[\u4e00-\u9fa5\d]*(?:号院?|栋|幢|楼|单元|层|室)[\u4e00-\u9fa5\d]*)/g,
-    mask: (m) => m, // placeholder, overridden at runtime
-  },
-];
-
-type AddressLevel = 'province' | 'district' | 'street';
 const ADDRESS_LEVELS: { value: AddressLevel; label: string }[] = [
   { value: 'province', label: '省/市级' },
   { value: 'district', label: '区/县级' },
   { value: 'street', label: '街道级' },
 ];
-
-interface CustomRuleInput {
-  name: string;
-  pattern: string;
-  replacement: string;
-}
-
-interface MatchInfo {
-  start: number;
-  end: number;
-  original: string;
-  masked: string;
-}
-
-interface LineData {
-  segments: { text: string; hl: boolean }[];
-  changed: boolean;
-}
-
-function textToLineData(text: string, ranges: { start: number; end: number }[]): LineData[] {
-  const lines = text.split('\n');
-  const result: LineData[] = [];
-  let charOffset = 0;
-  let ri = 0;
-  for (const line of lines) {
-    const lineStart = charOffset;
-    const lineEnd = charOffset + line.length;
-    const segments: { text: string; hl: boolean }[] = [];
-    let linePos = lineStart;
-    let changed = false;
-    while (ri < ranges.length && ranges[ri].start < lineEnd) {
-      const range = ranges[ri];
-      if (range.start > linePos) {
-        segments.push({ text: text.slice(linePos, range.start), hl: false });
-      }
-      segments.push({ text: text.slice(range.start, range.end), hl: true });
-      changed = true;
-      linePos = range.end;
-      ri++;
-    }
-    if (linePos < lineEnd) {
-      segments.push({ text: text.slice(linePos, lineEnd), hl: false });
-    }
-    if (segments.length === 0) {
-      segments.push({ text: '', hl: false });
-    }
-    result.push({ segments, changed });
-    charOffset = lineEnd + 1;
-  }
-  return result;
-}
 
 const DEMO_TEXT = `尊敬的 张三 先生，您好！
 
@@ -168,14 +30,13 @@ const DEMO_TEXT = `尊敬的 张三 先生，您好！
 此信息仅供核对，请勿转发。`;
 
 export default function DesensitizeTool() {
-  const [rules, setRules] = useState<MaskRule[]>(builtinRules);
+  const [rules, setRules] = useState<MaskRule[]>(() => createBuiltinRules({ addressLevel: 'street' }));
   const [input, setInput] = useState('');
   const [output, setOutput] = useState('');
   const [copied, setCopied] = useState(false);
   const [matchCount, setMatchCount] = useState(0);
   const [showCustom, setShowCustom] = useState(false);
   const [addressLevel, setAddressLevel] = useState<AddressLevel>('street');
-  const addressLevelRef = useRef<AddressLevel>('street');
   const [diffData, setDiffData] = useState<{ oldLines: LineData[]; newLines: LineData[] } | null>(null);
   const leftScrollRef = useRef<HTMLDivElement>(null);
   const rightScrollRef = useRef<HTMLDivElement>(null);
@@ -189,7 +50,17 @@ export default function DesensitizeTool() {
 
   const changeAddressLevel = useCallback((level: AddressLevel) => {
     setAddressLevel(level);
-    addressLevelRef.current = level;
+    setRules((prev) => {
+      const builtinEnabledMap = new Map(
+        prev.filter((rule) => rule.builtin).map((rule) => [rule.id, rule.enabled]),
+      );
+      const nextBuiltinRules = createBuiltinRules({ addressLevel: level }).map((rule) => ({
+        ...rule,
+        enabled: builtinEnabledMap.get(rule.id) ?? rule.enabled,
+      }));
+
+      return [...nextBuiltinRules, ...prev.filter((rule) => !rule.builtin)];
+    });
   }, []);
 
   const toggleRule = useCallback((id: string) => {
@@ -201,27 +72,18 @@ export default function DesensitizeTool() {
   }, []);
 
   const addCustomRule = useCallback(() => {
-    if (!customRule.name.trim() || !customRule.pattern.trim()) {
-      setCustomError('名称和正则表达式不能为空');
+    const result = createCustomRule(customRule);
+
+    if (result.error) {
+      setCustomError(result.error);
       return;
     }
-    try {
-      const regex = new RegExp(customRule.pattern, 'g');
-      const replacement = customRule.replacement;
-      const newRule: MaskRule = {
-        id: `custom_${Date.now()}`,
-        name: customRule.name,
-        enabled: true,
-        builtin: false,
-        pattern: regex,
-        mask: () => replacement,
-      };
-      setRules((prev) => [...prev, newRule]);
+
+    if (result.rule) {
+      setRules((prev) => [...prev, result.rule]);
       setCustomRule({ name: '', pattern: '', replacement: '***' });
       setCustomError('');
       setShowCustom(false);
-    } catch {
-      setCustomError('正则表达式语法错误');
     }
   }, [customRule]);
 
@@ -233,71 +95,11 @@ export default function DesensitizeTool() {
       return;
     }
 
-    const addressMask = (m: string) => {
-      const re = /((?:[\u4e00-\u9fa5]+(?:省|自治区))?(?:[\u4e00-\u9fa5]+(?:市|州|盟))?)((?:[\u4e00-\u9fa5]+(?:区|县|旗|镇|乡))?)([\u4e00-\u9fa5]+(?:路|街道?|大道|大街|巷|弄|胡同|里|村))?/;
-      const parts = re.exec(m);
-      if (!parts) return m;
-      const [, admin = '', district = '', street = ''] = parts;
-      const level = addressLevelRef.current;
-      if (level === 'province') return (admin || district) + '****';
-      if (level === 'district') return admin + district + '****';
-      return admin + district + street + '****';
-    };
+    const result = desensitizeText(input, rules);
 
-    // Collect all matches from the original text
-    const allMatches: (MatchInfo & { ruleIndex: number })[] = [];
-    for (let i = 0; i < rules.length; i++) {
-      const rule = rules[i];
-      if (!rule.enabled) continue;
-      const regex = new RegExp(rule.pattern.source, rule.pattern.flags);
-      const maskFn = rule.id === 'address' ? addressMask : rule.mask;
-      let match;
-      while ((match = regex.exec(input)) !== null) {
-        allMatches.push({
-          start: match.index,
-          end: match.index + match[0].length,
-          original: match[0],
-          masked: maskFn(match[0]),
-          ruleIndex: i,
-        });
-        if (!regex.global) break;
-      }
-    }
-
-    // Sort by position, then rule priority
-    allMatches.sort((a, b) => a.start - b.start || a.ruleIndex - b.ruleIndex);
-
-    // Remove overlapping matches (higher priority wins)
-    const filtered: MatchInfo[] = [];
-    let lastEnd = 0;
-    for (const m of allMatches) {
-      if (m.start >= lastEnd) {
-        filtered.push(m);
-        lastEnd = m.end;
-      }
-    }
-
-    // Build masked output and track ranges
-    let result = '';
-    let pos = 0;
-    const oldRanges: { start: number; end: number }[] = [];
-    const newRanges: { start: number; end: number }[] = [];
-    for (const m of filtered) {
-      result += input.slice(pos, m.start);
-      const newStart = result.length;
-      result += m.masked;
-      oldRanges.push({ start: m.start, end: m.end });
-      newRanges.push({ start: newStart, end: newStart + m.masked.length });
-      pos = m.end;
-    }
-    result += input.slice(pos);
-
-    setOutput(result);
-    setMatchCount(filtered.length);
-    setDiffData({
-      oldLines: textToLineData(input, oldRanges),
-      newLines: textToLineData(result, newRanges),
-    });
+    setOutput(result.output);
+    setMatchCount(result.matchCount);
+    setDiffData(buildDiffData(input, result.matches));
   }, [input, rules]);
 
   const copyOutput = useCallback(async () => {
