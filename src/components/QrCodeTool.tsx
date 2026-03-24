@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import QRCode from 'qrcode';
-import jsQR from 'jsqr';
 import { FiDownload, FiUploadCloud, FiCopy, FiCheck, FiImage, FiEdit3 } from 'react-icons/fi';
+import { decodeImageFile, generateQrCode, parseQrCodeFile, scanQrCode } from '../lib/qrcode';
 
 export default function QrCodeTool() {
     const [activeTab, setActiveTab] = useState<'generate' | 'parse'>('generate');
@@ -23,67 +23,43 @@ export default function QrCodeTool() {
 
     // Generate QR Code
     useEffect(() => {
-        if (!inputText.trim()) {
-            setQrImageUrl('');
-            return;
-        }
-        QRCode.toDataURL(inputText, {
-            width: 400,
-            margin: 2,
-            color: {
-                dark: '#0f172a',
-                light: '#ffffff'
-            }
-        })
-            .then(url => {
-                setQrImageUrl(url);
+        generateQrCode(inputText, { toDataURL: QRCode.toDataURL })
+            .then((result) => {
+                if (result.kind === 'empty') {
+                    setQrImageUrl('');
+                    setGenerateError('');
+                    return;
+                }
+
+                if (result.kind === 'error') {
+                    setQrImageUrl('');
+                    setGenerateError(result.message);
+                    return;
+                }
+
+                setQrImageUrl(result.dataUrl);
                 setGenerateError('');
-            })
-            .catch(err => {
-                console.error(err);
-                setGenerateError('生成二维码失败');
             });
     }, [inputText]);
 
-    // Parse logic
-    const decodeImage = useCallback((file: File) => {
-        if (!file.type.startsWith('image/')) {
-            setParseError('请上传图片文件');
+    const decodeImage = useCallback(async (file: File) => {
+        const result = await parseQrCodeFile(file, {
+            decodeImageFile,
+            scanQrCode,
+        });
+
+        if (result.previewUrl) {
+            setUploadedImagePreview(result.previewUrl);
+        }
+
+        if (result.kind === 'error') {
+            setParseResult('');
+            setParseError(result.message);
             return;
         }
 
-        const url = URL.createObjectURL(file);
-        setUploadedImagePreview(url);
-
-        const img = new Image();
-        img.onload = () => {
-            const canvas = document.createElement('canvas');
-            canvas.width = img.width;
-            canvas.height = img.height;
-            const ctx = canvas.getContext('2d');
-            if (!ctx) {
-                setParseError('浏览器不支持 canvas');
-                return;
-            }
-
-            ctx.drawImage(img, 0, 0, img.width, img.height);
-            const imageData = ctx.getImageData(0, 0, img.width, img.height);
-            const code = jsQR(imageData.data, imageData.width, imageData.height, {
-                inversionAttempts: "dontInvert",
-            });
-
-            if (code) {
-                setParseResult(code.data);
-                setParseError('');
-            } else {
-                setParseResult('');
-                setParseError('未能识别到二维码，请尝试更清晰的图片');
-            }
-        };
-        img.onerror = () => {
-            setParseError('读取图片失败');
-        };
-        img.src = url;
+        setParseResult(result.text);
+        setParseError('');
     }, []);
 
     // Handle File Upload

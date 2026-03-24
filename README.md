@@ -92,6 +92,15 @@ npm run dev
 启动后访问 `http://localhost:4321`，首页展示所有工具入口。
 
 > ⚠️ 本地开发如遇 native 依赖报错，请参考 [.cloudflare-ci.md](.cloudflare-ci.md)。
+>
+> ⚠️ 如果新增或调整了前端依赖导入，Vite 可能出现 `Outdated Optimize Dep`、页面空白或 hydration 失败。这通常是依赖预构建缓存过期导致的。请先停止当前开发服务器，再执行：
+>
+> ```sh
+> rm -rf node_modules/.vite
+> npm run dev
+> ```
+>
+> 如果只是刚改完依赖或 Vite 配置，通常仅重启一次 `npm run dev` 就能恢复。
 
 ## 📦 构建与部署
 
