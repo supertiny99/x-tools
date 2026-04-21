@@ -62,6 +62,16 @@
 - **自定义规则**: 支持正则表达式自定义脱敏规则
 - **一键脱敏**: 输入即处理，原文与脱敏结果对照
 
+### 🎙️ MiMo TTS 语音生成
+
+参考小米 MiMo TTS 的 OpenAI 兼容调用方式，在浏览器中直接生成语音。
+
+- **手动鉴权**: 用户自行填写 `API Key`，仅保存在当前浏览器会话
+- **音频配置**: 支持切换 `voice` 与 `format`
+- **风格控制**: 支持 `<style>...</style>` 整体风格控制，并内置官方推荐风格样例
+- **细粒度标签**: 支持在正文中插入停顿、呼吸、低声、喊话等标签样例
+- **结果预览**: 生成后可直接试听、下载，并查看最终请求体
+
 ### 📝 Markdown 预览
 
 粘贴 Markdown 文本，即刻获得美观的实时渲染预览。
@@ -92,6 +102,12 @@ npm run dev
 启动后访问 `http://localhost:4321`，首页展示所有工具入口。
 
 > ⚠️ 本地开发如遇 native 依赖报错，请参考 [.cloudflare-ci.md](.cloudflare-ci.md)。
+>
+> 当前仓库为了避免 `rollup`、`lightningcss`、`@tailwindcss/oxide` 在部分 macOS / npm 环境下漏装可选原生依赖，已将相关 Darwin ARM 包显式写入依赖声明。若仍遇到 `Cannot find module @rollup/rollup-darwin-arm64`、`lightningcss.darwin-arm64.node` 或 `@tailwindcss/oxide-darwin-arm64` 错误，请重新执行一次：
+>
+> ```sh
+> npm install
+> ```
 >
 > ⚠️ 如果新增或调整了前端依赖导入，Vite 可能出现 `Outdated Optimize Dep`、页面空白或 hydration 失败。这通常是依赖预构建缓存过期导致的。请先停止当前开发服务器，再执行：
 >

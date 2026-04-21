@@ -4,6 +4,15 @@ import Layout from '../layouts/Layout.astro';
 // 我们可以配置工具的一个列表数据
 const tools = [
   {
+    id: 'mimo-tts',
+    name: 'MiMo TTS 语音生成',
+    description: '接入小米 MiMo TTS，手动填写 API Key 后即可配置音色、整体风格与细粒度音频标签，生成可试听下载的语音。',
+    icon: '🎙️',
+    href: '/tools/mimo-tts',
+    tags: ['TTS', '语音生成', 'MiMo'],
+    color: 'from-emerald-500 to-lime-600'
+  },
+  {
     id: 'webrtc',
     name: 'WebRTC 直连通信',
     description: '无需后端服务器，通过 P2P 建立两人私密连接。支持实时文本聊天与高速大文件传输。',
