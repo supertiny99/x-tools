@@ -103,10 +103,10 @@ npm run dev
 
 > ⚠️ 本地开发如遇 native 依赖报错，请参考 [.cloudflare-ci.md](.cloudflare-ci.md)。
 >
-> 当前仓库为了避免 `rollup`、`lightningcss`、`@tailwindcss/oxide` 在部分 macOS / npm 环境下漏装可选原生依赖，已将相关 Darwin ARM 包显式写入依赖声明。若仍遇到 `Cannot find module @rollup/rollup-darwin-arm64`、`lightningcss.darwin-arm64.node` 或 `@tailwindcss/oxide-darwin-arm64` 错误，请重新执行一次：
+> 若本地 macOS 环境仍遇到 `Cannot find module @rollup/rollup-darwin-arm64`、`lightningcss.darwin-arm64.node` 或 `@tailwindcss/oxide-darwin-arm64` 错误，请按 CI 文档中的方式临时补装，不要写入 `package.json`：
 >
 > ```sh
-> npm install
+> npm install --no-save @rollup/rollup-darwin-arm64 lightningcss-darwin-arm64 @tailwindcss/oxide-darwin-arm64
 > ```
 >
 > ⚠️ 如果新增或调整了前端依赖导入，Vite 可能出现 `Outdated Optimize Dep`、页面空白或 hydration 失败。这通常是依赖预构建缓存过期导致的。请先停止当前开发服务器，再执行：
