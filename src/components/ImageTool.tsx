@@ -1,10 +1,13 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
     FiUploadCloud, FiDownload, FiImage, FiSliders, FiCrop,
-    FiMaximize2, FiDroplet, FiRefreshCw, FiCheck, FiX, FiInfo
+    FiMaximize2, FiDroplet, FiRefreshCw, FiCheck, FiX, FiInfo, FiGrid, FiMove, FiPlus, FiClipboard, FiTrash2
 } from 'react-icons/fi';
+import { clampPosterQrLayer, composePosterQrPng, type PosterQrLayer } from '../lib/image/poster-qr';
 
-type TabType = 'convert' | 'compress' | 'crop' | 'resize' | 'watermark';
+type TabType = 'convert' | 'compress' | 'crop' | 'resize' | 'watermark' | 'posterQr';
+type PosterQrId = string;
+type PosterQrLayerKey = keyof PosterQrLayer;
 
 interface ImageState {
     file: File | null;
@@ -12,6 +15,17 @@ interface ImageState {
     width: number;
     height: number;
     name: string;
+}
+
+interface PosterQrImage extends ImageState {
+    id: PosterQrId;
+    layer: PosterQrLayer;
+}
+
+interface PosterQrSnapshot {
+    poster: ImageState | null;
+    qrImages: PosterQrImage[];
+    selectedQrId: PosterQrId | null;
 }
 
 const FORMAT_OPTIONS = ['image/jpeg', 'image/png', 'image/webp'];
@@ -35,6 +49,571 @@ function formatBytes(bytes: number): string {
 
 function getBaseName(filename: string): string {
     return filename.replace(/\.[^/.]+$/, '');
+}
+
+function readBrowserImage(file: File): Promise<ImageState> {
+    return new Promise((resolve, reject) => {
+        if (!file.type.startsWith('image/')) {
+            reject(new Error('请选择图片文件'));
+            return;
+        }
+
+        const url = URL.createObjectURL(file);
+        const img = new Image();
+        img.onload = () => resolve({ file, src: url, width: img.width, height: img.height, name: file.name });
+        img.onerror = () => reject(new Error('图片读取失败'));
+        img.src = url;
+    });
+}
+
+function loadHtmlImage(src: string): Promise<HTMLImageElement> {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = reject;
+        img.src = src;
+    });
+}
+
+function createDefaultQrLayer(poster: ImageState, index: number): PosterQrLayer {
+    const size = Math.round(Math.min(poster.width, poster.height) * 0.14);
+    const y = Math.round(poster.height - size - poster.height * 0.035);
+    const slotCount = Math.max(1, Math.min(4, index + 2));
+    const slot = index % slotCount;
+    const x = Math.round((poster.width * (slot + 1)) / (slotCount + 1) - size / 2);
+
+    return clampPosterQrLayer({ x, y, width: size, height: size }, poster.width, poster.height);
+}
+
+function isEditableTarget(target: EventTarget | null) {
+    if (!(target instanceof HTMLElement)) return false;
+    const tagName = target.tagName.toLowerCase();
+    return target.isContentEditable || tagName === 'input' || tagName === 'textarea' || tagName === 'select';
+}
+
+function PosterQrReplacementTool() {
+    const [poster, setPoster] = useState<ImageState | null>(null);
+    const [qrImages, setQrImages] = useState<PosterQrImage[]>([]);
+    const [selectedQrId, setSelectedQrId] = useState<PosterQrId | null>(null);
+    const [resultUrl, setResultUrl] = useState('');
+    const [resultSize, setResultSize] = useState(0);
+    const [processing, setProcessing] = useState(false);
+    const [error, setError] = useState('');
+    const [previewWidth, setPreviewWidth] = useState(0);
+    const [layerInputDrafts, setLayerInputDrafts] = useState<Record<PosterQrId, Partial<Record<PosterQrLayerKey, string>>>>({});
+    const [dragState, setDragState] = useState<{
+        id: PosterQrId;
+        mode: 'move' | 'resize';
+        startX: number;
+        startY: number;
+        layer: PosterQrLayer;
+    } | null>(null);
+
+    const posterInputRef = useRef<HTMLInputElement>(null);
+    const qrInputRef = useRef<HTMLInputElement>(null);
+    const previewShellRef = useRef<HTMLDivElement>(null);
+    const layerCounterRef = useRef(0);
+    const undoStackRef = useRef<PosterQrSnapshot[]>([]);
+
+    const saveHistory = useCallback(() => {
+        undoStackRef.current = [
+            ...undoStackRef.current.slice(-29),
+            {
+                poster,
+                qrImages,
+                selectedQrId,
+            },
+        ];
+    }, [poster, qrImages, selectedQrId]);
+
+    const undoLastChange = useCallback(() => {
+        const previous = undoStackRef.current.pop();
+        if (!previous) return;
+
+        setPoster(previous.poster);
+        setQrImages(previous.qrImages);
+        setSelectedQrId(previous.selectedQrId);
+        setResultUrl('');
+        setResultSize(0);
+        setError('');
+        setLayerInputDrafts({});
+    }, []);
+
+    const getLayerInputValue = (image: PosterQrImage, key: PosterQrLayerKey) => {
+        return layerInputDrafts[image.id]?.[key] ?? String(image.layer[key]);
+    };
+
+    const clearLayerInputDraft = (id: PosterQrId, key: PosterQrLayerKey) => {
+        setLayerInputDrafts(current => {
+            const nextLayerDraft = { ...current[id] };
+            delete nextLayerDraft[key];
+            return { ...current, [id]: nextLayerDraft };
+        });
+    };
+
+    const handleLayerInputChange = (id: PosterQrId, key: PosterQrLayerKey, value: string) => {
+        setLayerInputDrafts(current => ({
+            ...current,
+            [id]: {
+                ...current[id],
+                [key]: value,
+            },
+        }));
+
+        if (value === '') return;
+        const nextValue = Number(value);
+        if (!Number.isFinite(nextValue)) return;
+        updateQrLayer(id, { [key]: nextValue } as Partial<PosterQrLayer>);
+    };
+
+    useEffect(() => {
+        if (!previewShellRef.current) return;
+        if (typeof ResizeObserver === 'undefined') {
+            setPreviewWidth(previewShellRef.current.clientWidth || 720);
+            return;
+        }
+        const resizeObserver = new ResizeObserver(entries => {
+            const width = entries[0]?.contentRect.width || 0;
+            setPreviewWidth(width);
+        });
+        resizeObserver.observe(previewShellRef.current);
+        return () => resizeObserver.disconnect();
+    }, []);
+
+    const previewScale = poster && previewWidth
+        ? Math.min(1, previewWidth / poster.width)
+        : 1;
+    const previewHeight = poster ? Math.round(poster.height * previewScale) : 360;
+
+    const updateQrLayer = useCallback((id: PosterQrId, patch: Partial<PosterQrLayer>, recordHistory = true) => {
+        if (!poster) return;
+        if (recordHistory) saveHistory();
+        setQrImages(current => {
+            return current.map(qr => {
+                if (qr.id !== id) return qr;
+                const nextLayer = clampPosterQrLayer({ ...qr.layer, ...patch }, poster.width, poster.height);
+                return { ...qr, layer: nextLayer };
+            });
+        });
+        setResultUrl('');
+        setResultSize(0);
+    }, [poster, saveHistory]);
+
+    useEffect(() => {
+        if (!dragState || !poster) return;
+
+        const handleMove = (event: PointerEvent) => {
+            const dx = (event.clientX - dragState.startX) / previewScale;
+            const dy = (event.clientY - dragState.startY) / previewScale;
+
+            if (dragState.mode === 'move') {
+                updateQrLayer(dragState.id, {
+                    x: dragState.layer.x + dx,
+                    y: dragState.layer.y + dy,
+                }, false);
+            } else {
+                const nextSize = Math.max(24, Math.round(Math.max(dragState.layer.width + dx, dragState.layer.height + dy)));
+                updateQrLayer(dragState.id, {
+                    width: nextSize,
+                    height: nextSize,
+                }, false);
+            }
+        };
+        const handleEnd = () => setDragState(null);
+
+        window.addEventListener('pointermove', handleMove);
+        window.addEventListener('pointerup', handleEnd);
+        return () => {
+            window.removeEventListener('pointermove', handleMove);
+            window.removeEventListener('pointerup', handleEnd);
+        };
+    }, [dragState, poster, previewScale, updateQrLayer]);
+
+    const handlePosterFile = async (file: File) => {
+        try {
+            setError('');
+            const nextPoster = await readBrowserImage(file);
+            saveHistory();
+            setPoster(nextPoster);
+            setQrImages(current => current.map((qr, index) => ({ ...qr, layer: createDefaultQrLayer(nextPoster, index) })));
+            setLayerInputDrafts({});
+            setResultUrl('');
+            setResultSize(0);
+        } catch (err) {
+            setError(err instanceof Error ? err.message : '图片读取失败');
+        }
+    };
+
+    const handleQrFiles = async (files: FileList | File[]) => {
+        try {
+            setError('');
+            const imageFiles = Array.from(files).filter(file => file.type.startsWith('image/'));
+            if (imageFiles.length === 0) {
+                setError('剪贴板或文件中没有图片');
+                return;
+            }
+
+            const loadedImages = await Promise.all(imageFiles.map(readBrowserImage));
+            saveHistory();
+            setQrImages(current => {
+                const nextImages = loadedImages.map((image, offset) => {
+                    const index = current.length + offset;
+                    const id = `qr-${Date.now()}-${layerCounterRef.current++}`;
+                    const layer = poster
+                        ? createDefaultQrLayer(poster, index)
+                        : { x: 0, y: 0, width: image.width, height: image.height };
+                    return { ...image, id, layer };
+                });
+                setSelectedQrId(nextImages[nextImages.length - 1]?.id || current[0]?.id || null);
+                return [...current, ...nextImages];
+            });
+            setResultUrl('');
+            setResultSize(0);
+        } catch (err) {
+            setError(err instanceof Error ? err.message : '图片读取失败');
+        }
+    };
+
+    const handleRemoveQr = (id: PosterQrId) => {
+        saveHistory();
+        setQrImages(current => {
+            const next = current.filter(qr => qr.id !== id);
+            if (selectedQrId === id) {
+                setSelectedQrId(next[0]?.id || null);
+            }
+            return next;
+        });
+        setResultUrl('');
+        setResultSize(0);
+        setLayerInputDrafts(current => {
+            const next = { ...current };
+            delete next[id];
+            return next;
+        });
+    };
+
+    const handleClipboardFiles = useCallback(async (files: File[]) => {
+        if (files.length === 0) {
+            setError('剪贴板中没有图片');
+            return;
+        }
+
+        if (!poster) {
+            await handlePosterFile(files[0]);
+            if (files.length > 1) {
+                await handleQrFiles(files.slice(1));
+            }
+            return;
+        }
+
+        await handleQrFiles(files);
+    }, [poster]);
+
+    const pasteFromClipboard = useCallback(async () => {
+        try {
+            setError('');
+            const clipboard = navigator.clipboard;
+            if (!clipboard || !('read' in clipboard)) {
+                setError('当前浏览器不支持直接读取剪贴板图片');
+                return;
+            }
+
+            const clipboardItems = await clipboard.read();
+            const files: File[] = [];
+            for (const item of clipboardItems) {
+                const imageType = item.types.find(type => type.startsWith('image/'));
+                if (!imageType) continue;
+                const blob = await item.getType(imageType);
+                const extension = imageType.split('/')[1] || 'png';
+                files.push(new File([blob], `clipboard-${Date.now()}.${extension}`, { type: imageType }));
+            }
+            await handleClipboardFiles(files);
+        } catch (err) {
+            setError(err instanceof Error ? err.message : '剪贴板图片读取失败');
+        }
+    }, [handleClipboardFiles]);
+
+    useEffect(() => {
+        const handlePaste = (event: ClipboardEvent) => {
+            const files = Array.from(event.clipboardData?.files || []).filter(file => file.type.startsWith('image/'));
+            if (files.length > 0) {
+                event.preventDefault();
+                void handleClipboardFiles(files);
+            }
+        };
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z' && !event.shiftKey && !isEditableTarget(event.target)) {
+                event.preventDefault();
+                undoLastChange();
+                return;
+            }
+            if (event.key.toLowerCase() !== 'v' || event.ctrlKey || event.metaKey || event.altKey || isEditableTarget(event.target)) return;
+            event.preventDefault();
+            void pasteFromClipboard();
+        };
+
+        window.addEventListener('paste', handlePaste);
+        window.addEventListener('keydown', handleKeyDown);
+        return () => {
+            window.removeEventListener('paste', handlePaste);
+            window.removeEventListener('keydown', handleKeyDown);
+        };
+    }, [handleClipboardFiles, pasteFromClipboard, undoLastChange]);
+
+    const handleExport = async () => {
+        if (!poster) return;
+        if (qrImages.length === 0) return;
+
+        setProcessing(true);
+        setError('');
+        try {
+            const posterImg = await loadHtmlImage(poster.src);
+            const drawableLayers = await Promise.all(qrImages.map(async item => ({
+                image: await loadHtmlImage(item.src),
+                layer: item.layer,
+            })));
+            const url = await composePosterQrPng(posterImg, drawableLayers);
+            const blob = await (await fetch(url)).blob();
+            setResultUrl(url);
+            setResultSize(blob.size);
+        } catch (err) {
+            setError(err instanceof Error ? err.message : '图片合成失败');
+        } finally {
+            setProcessing(false);
+        }
+    };
+
+    const handleDownload = () => {
+        if (!resultUrl) return;
+        const a = document.createElement('a');
+        a.href = resultUrl;
+        a.download = `${getBaseName(poster?.name || 'poster')}_qr_replaced.png`;
+        a.click();
+    };
+
+    const selectedImage = qrImages.find(qr => qr.id === selectedQrId) || null;
+    const canExport = Boolean(poster && qrImages.length > 0);
+
+    return (
+        <div className="flex-grow flex flex-col min-w-0">
+            <input
+                ref={posterInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={event => {
+                    const file = event.target.files?.[0];
+                    if (file) void handlePosterFile(file);
+                    event.target.value = '';
+                }}
+            />
+            <input
+                ref={qrInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                className="hidden"
+                onChange={event => {
+                    const files = event.target.files;
+                    if (files?.length) void handleQrFiles(files);
+                    event.target.value = '';
+                }}
+            />
+
+            <div className="border-b border-slate-200 dark:border-slate-800 bg-white/50 dark:bg-slate-950/30 p-5 md:p-6">
+                <div className="grid gap-4 xl:grid-cols-[minmax(220px,280px)_minmax(0,1fr)_minmax(280px,360px)]">
+                    <div className="grid gap-3">
+                        <button
+                            type="button"
+                            onClick={() => posterInputRef.current?.click()}
+                            className="text-left rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4 hover:border-brand-400 transition-colors"
+                        >
+                            <span className="flex items-center gap-2 font-bold text-slate-800 dark:text-white">
+                                <FiUploadCloud className="text-brand-500" /> 上传海报底图
+                            </span>
+                            <span className="mt-2 block text-xs text-slate-500 dark:text-slate-400 truncate">
+                                {poster ? `${poster.name} · ${poster.width} × ${poster.height}` : 'PNG / JPG / WebP'}
+                            </span>
+                        </button>
+                        <div className="grid grid-cols-2 gap-2">
+                            <button
+                                type="button"
+                                onClick={() => qrInputRef.current?.click()}
+                                className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2.5 text-sm font-bold text-slate-700 dark:text-slate-200 hover:border-brand-400 transition-colors flex items-center justify-center gap-2"
+                            >
+                                <FiPlus /> 添加二维码
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => void pasteFromClipboard()}
+                                className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2.5 text-sm font-bold text-slate-700 dark:text-slate-200 hover:border-brand-400 transition-colors flex items-center justify-center gap-2"
+                            >
+                                <FiClipboard /> 粘贴图片
+                            </button>
+                        </div>
+                    </div>
+
+                    <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-3 min-w-0">
+                        <div className="mb-2 flex items-center justify-between gap-3">
+                            <span className="text-sm font-bold text-slate-800 dark:text-white">二维码图层</span>
+                            <span className="text-xs text-slate-500 dark:text-slate-400">{qrImages.length} 个</span>
+                        </div>
+                        {qrImages.length > 0 ? (
+                            <div className="flex gap-2 overflow-x-auto pb-1">
+                                {qrImages.map((item, index) => (
+                                    <button
+                                        key={item.id}
+                                        type="button"
+                                        onClick={() => setSelectedQrId(item.id)}
+                                        className={`shrink-0 rounded-lg border px-3 py-2 text-left text-xs transition-colors ${selectedQrId === item.id
+                                            ? 'border-brand-500 bg-brand-50 text-brand-700 dark:bg-brand-950/40 dark:text-brand-300'
+                                            : 'border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300'
+                                            }`}
+                                    >
+                                        <span className="block font-bold">二维码 {index + 1}</span>
+                                        <span className="block max-w-28 truncate">{item.name}</span>
+                                    </button>
+                                ))}
+                            </div>
+                        ) : (
+                            <div className="text-sm text-slate-500 dark:text-slate-400">暂无二维码图层</div>
+                        )}
+                    </div>
+
+                    <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-3">
+                        {poster && selectedImage ? (
+                            <div className="grid grid-cols-4 gap-2">
+                                {[
+                                    { key: 'x', label: 'X', max: poster.width },
+                                    { key: 'y', label: 'Y', max: poster.height },
+                                    { key: 'width', label: '宽', max: poster.width },
+                                    { key: 'height', label: '高', max: poster.height },
+                                ].map(field => (
+                                    <label key={field.key} className="text-xs font-medium text-slate-500 dark:text-slate-400">
+                                        {field.label}
+                                        <input
+                                            type="number"
+                                            min={0}
+                                            max={field.max}
+                                            value={getLayerInputValue(selectedImage, field.key as PosterQrLayerKey)}
+                                            onChange={event => handleLayerInputChange(selectedImage.id, field.key as PosterQrLayerKey, event.target.value)}
+                                            onBlur={() => clearLayerInputDraft(selectedImage.id, field.key as PosterQrLayerKey)}
+                                            className="mt-1 w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/50 text-slate-700 dark:text-slate-200"
+                                        />
+                                    </label>
+                                ))}
+                            </div>
+                        ) : (
+                            <div className="text-sm text-slate-500 dark:text-slate-400">选择一个二维码图层后可调整坐标。</div>
+                        )}
+                    </div>
+
+                    <div className="grid gap-2">
+                        {error && (
+                            <div className="rounded-lg border border-red-200 bg-red-50 p-2.5 text-sm text-red-600 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300">
+                                {error}
+                            </div>
+                        )}
+                        <button
+                            type="button"
+                            onClick={handleExport}
+                            disabled={!canExport || processing}
+                            className="w-full py-3 bg-brand-600 hover:bg-brand-700 disabled:bg-slate-300 disabled:dark:bg-slate-800 disabled:cursor-not-allowed text-white rounded-xl font-bold shadow-md shadow-brand-500/20 transition-all flex items-center justify-center gap-2"
+                        >
+                            {processing ? <><FiRefreshCw className="animate-spin" /> 合成中...</> : <><FiCheck /> 导出 PNG</>}
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div className="flex-1 min-h-0 p-5 md:p-6 flex flex-col gap-4">
+                <div ref={previewShellRef} className="flex-1 min-h-[520px] rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-900/60 p-4 overflow-auto">
+                    {poster ? (
+                        <div
+                            className="relative mx-auto shadow-sm"
+                            style={{ width: Math.round(poster.width * previewScale), height: previewHeight }}
+                        >
+                            <img src={poster.src} alt="poster preview" className="absolute inset-0 h-full w-full select-none object-contain" draggable={false} />
+                            {qrImages.map((item, index) => {
+                                const active = selectedQrId === item.id;
+                                return (
+                                    <div
+                                        key={item.id}
+                                        role="button"
+                                        tabIndex={0}
+                                        aria-label={`二维码 ${index + 1} 图层`}
+                                        onPointerDown={event => {
+                                            setSelectedQrId(item.id);
+                                            saveHistory();
+                                            setDragState({ id: item.id, mode: 'move', startX: event.clientX, startY: event.clientY, layer: item.layer });
+                                        }}
+                                        className={`absolute cursor-move touch-none border-2 ${active ? 'border-brand-500' : 'border-white/80'} shadow-lg`}
+                                        style={{
+                                            left: item.layer.x * previewScale,
+                                            top: item.layer.y * previewScale,
+                                            width: item.layer.width * previewScale,
+                                            height: item.layer.height * previewScale,
+                                        }}
+                                    >
+                                        <img src={item.src} alt={`二维码 ${index + 1}`} className="h-full w-full select-none object-fill" draggable={false} />
+                                        <span className="absolute left-1 top-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-bold text-white">{index + 1}</span>
+                                        {active && (
+                                            <button
+                                                type="button"
+                                                aria-label={`删除二维码 ${index + 1}`}
+                                                onClick={event => {
+                                                    event.stopPropagation();
+                                                    handleRemoveQr(item.id);
+                                                }}
+                                                className="absolute -top-2 -right-2 flex h-5 w-5 items-center justify-center rounded-full bg-red-600 text-white shadow"
+                                            >
+                                                <FiTrash2 className="text-xs" />
+                                            </button>
+                                        )}
+                                        <button
+                                            type="button"
+                                            aria-label={`二维码 ${index + 1} 缩放`}
+                                            onPointerDown={event => {
+                                                event.stopPropagation();
+                                                setSelectedQrId(item.id);
+                                                saveHistory();
+                                                setDragState({ id: item.id, mode: 'resize', startX: event.clientX, startY: event.clientY, layer: item.layer });
+                                            }}
+                                            className="absolute -bottom-2 -right-2 flex h-5 w-5 items-center justify-center rounded-full bg-brand-600 text-white shadow"
+                                        >
+                                            <FiMove className="text-xs" />
+                                        </button>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    ) : (
+                        <div className="flex h-full min-h-[360px] flex-col items-center justify-center gap-4 text-slate-400 dark:text-slate-600">
+                            <FiImage className="text-5xl" />
+                            <p className="text-sm">上传海报底图后开始编辑</p>
+                        </div>
+                    )}
+                </div>
+
+                {resultUrl && (
+                    <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4 flex flex-col md:flex-row items-center gap-4">
+                        <img src={resultUrl} alt="合成结果" className="max-h-40 rounded-xl border border-slate-100 dark:border-slate-800 object-contain" />
+                        <div className="flex-1 text-sm text-slate-600 dark:text-slate-300">
+                            <p className="font-bold text-slate-800 dark:text-white">合成完成</p>
+                            <p className="mt-1">PNG · {poster?.width} × {poster?.height} px · {formatBytes(resultSize)}</p>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={handleDownload}
+                            className="w-full md:w-auto px-5 py-3 bg-brand-600 hover:bg-brand-700 text-white rounded-xl font-bold shadow-md shadow-brand-500/20 transition-all flex items-center justify-center gap-2"
+                        >
+                            <FiDownload /> 下载图片
+                        </button>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
 }
 
 export default function ImageTool() {
@@ -358,6 +937,7 @@ export default function ImageTool() {
             case 'crop': return processCrop();
             case 'resize': return processResize();
             case 'watermark': return processWatermark();
+            case 'posterQr': return undefined;
         }
     };
 
@@ -394,6 +974,7 @@ export default function ImageTool() {
         { id: 'crop', label: '裁剪', icon: <FiCrop /> },
         { id: 'resize', label: '缩放', icon: <FiMaximize2 /> },
         { id: 'watermark', label: '水印', icon: <FiDroplet /> },
+        { id: 'posterQr', label: '二维码替换', icon: <FiGrid /> },
     ];
 
     return (
@@ -424,6 +1005,9 @@ export default function ImageTool() {
 
             {/* Main Content */}
             <div className="flex-grow flex flex-col bg-white/60 dark:bg-slate-950/60 overflow-y-auto">
+                {activeTab === 'posterQr' ? (
+                    <PosterQrReplacementTool />
+                ) : (
                 <div className="flex-grow flex flex-col lg:flex-row gap-0 divide-y lg:divide-y-0 lg:divide-x divide-slate-200 dark:divide-slate-800">
                     {/* Left: Upload + Settings */}
                     <div className="flex-1 p-6 md:p-8 flex flex-col gap-6 min-w-0">
@@ -763,6 +1347,7 @@ export default function ImageTool() {
                         )}
                     </div>
                 </div>
+                )}
             </div>
         </div>
     );
